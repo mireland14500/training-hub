@@ -4,7 +4,7 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "Training Hub",
     short_name: "Training",
-    description: "Recovery, running analysis and SkiErg logging",
+    description: "HYROX prediction, fitness progress and training-load advice",
     start_url: "/",
     display: "standalone",
     background_color: "#0d1014",

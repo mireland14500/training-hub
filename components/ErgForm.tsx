@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { saveSkiSession } from "@/app/actions";
+import { saveErgSession } from "@/app/actions";
+import { fmtTime as fmt, localInputValue, readPhoto } from "./photo";
 
 interface Split {
   time_s: number | null;
@@ -13,6 +14,7 @@ interface Split {
   heart_rate: number | null;
 }
 interface Reading {
+  machine: "SkiErg" | "RowErg" | "BikeErg" | "Other";
   workout_description: string;
   total_time_s: number | null;
   distance_m: number | null;
@@ -29,32 +31,8 @@ export interface LinkCandidate {
   label: string;
 }
 
-function fmt(s: number | null | undefined): string {
-  if (s == null) return "";
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = (s % 60).toFixed(1).replace(/\.0$/, "");
-  const ss = sec.padStart(sec.includes(".") ? 4 : 2, "0");
-  return h ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
-}
-
-/** Shrinks the photo so uploads are fast on mobile data and under server limits. */
-async function resize(file: File, max = 1600): Promise<Blob> {
-  const bmp = await createImageBitmap(file);
-  const scale = Math.min(1, max / Math.max(bmp.width, bmp.height));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(bmp.width * scale);
-  canvas.height = Math.round(bmp.height * scale);
-  canvas.getContext("2d")!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
-  return new Promise((res, rej) => canvas.toBlob((b) => (b ? res(b) : rej(new Error("Could not process photo"))), "image/jpeg", 0.85));
-}
-
-function localInputValue(d: Date) {
-  const off = d.getTimezoneOffset() * 60000;
-  return new Date(d.getTime() - off).toISOString().slice(0, 16);
-}
-
-export default function SkiForm({ candidates }: { candidates: LinkCandidate[] }) {
+export default function ErgForm({ candidates, initialMachine }: { candidates: LinkCandidate[]; initialMachine: string }) {
+  const [machine, setMachine] = useState(initialMachine);
   const [preview, setPreview] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -75,14 +53,12 @@ export default function SkiForm({ candidates }: { candidates: LinkCandidate[] })
     setBusy(true);
     setPreview(URL.createObjectURL(file));
     try {
-      const body = new FormData();
-      body.append("photo", new File([await resize(file)], "monitor.jpg", { type: "image/jpeg" }));
-      const res = await fetch("/api/ski/read", { method: "POST", body });
-      const data = await res.json();
+      const data = await readPhoto<Reading>(file, "erg");
       if (data.photoPath) setPhotoPath(data.photoPath);
       if (data.error) setError(data.error);
       const r: Reading | null = data.reading;
       if (r) {
+        if (r.machine !== "Other") setMachine(r.machine);
         setF({
           workout: r.workout_description ?? "",
           time: fmt(r.total_time_s),
@@ -111,7 +87,7 @@ export default function SkiForm({ candidates }: { candidates: LinkCandidate[] })
   );
 
   return (
-    <form action={saveSkiSession} className="space-y-4">
+    <form action={saveErgSession} className="space-y-4">
       <div className="card">
         <label className="flex cursor-pointer flex-col items-center gap-3 rounded-xl border-2 border-dashed border-border p-6 text-center">
           {preview ? (
@@ -123,7 +99,7 @@ export default function SkiForm({ candidates }: { candidates: LinkCandidate[] })
                 <path d="M4 8h3l2-3h6l2 3h3v11H4z" />
                 <circle cx="12" cy="13" r="3.5" />
               </svg>
-              <span className="font-semibold">Take or upload a photo of the monitor</span>
+              <span className="font-semibold">Take or upload a photo of the erg monitor</span>
               <span className="text-xs text-muted">Straight-on, screen filling the frame, after the workout summary shows</span>
             </>
           )}
@@ -139,6 +115,14 @@ export default function SkiForm({ candidates }: { candidates: LinkCandidate[] })
         <input type="hidden" name="photo_path" value={photoPath} />
         <input type="hidden" name="splits" value={JSON.stringify(splits)} />
         <input type="hidden" name="start_iso" value={startIso} />
+        <input type="hidden" name="machine" value={machine} />
+        <div className="grid grid-cols-3 gap-2">
+          {["SkiErg", "RowErg", "BikeErg"].map((m) => (
+            <button type="button" key={m} onClick={() => setMachine(m)} className={`rounded-xl border py-2 text-sm font-semibold ${machine === m ? "border-accent bg-accent text-white" : "border-border"}`}>
+              {m}
+            </button>
+          ))}
+        </div>
         <div className="grid grid-cols-2 gap-3">
           {input("workout", "Workout", "e.g. 2000m or 8x500m", "text")}
           <label className="block">

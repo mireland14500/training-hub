@@ -1,7 +1,7 @@
 "use client";
 
 import { useTransition } from "react";
-import { deleteActivity, setRpe } from "@/app/actions";
+import { deleteActivity, deleteBenchmark, setRpe } from "@/app/actions";
 
 export function RpeSelect({ id, value }: { id: string; value: number | null }) {
   const [pending, start] = useTransition();
@@ -30,6 +30,15 @@ export function DeleteButton({ id }: { id: string }) {
       onClick={() => confirm("Delete this session?") && start(() => deleteActivity(id))}
     >
       Delete
+    </button>
+  );
+}
+
+export function BenchmarkDelete({ id }: { id: string }) {
+  const [pending, start] = useTransition();
+  return (
+    <button className="text-xs text-muted hover:text-bad" disabled={pending} aria-label="Delete benchmark" onClick={() => confirm("Delete this benchmark?") && start(() => deleteBenchmark(id))}>
+      ✕
     </button>
   );
 }

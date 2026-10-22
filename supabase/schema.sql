@@ -32,11 +32,16 @@ create table if not exists athlete (
   -- Optional goal race shown on the dashboard.
   goal_name text,
   goal_date date,
-  goal_distance_m numeric
+  goal_distance_m numeric,
+  -- HYROX division used for race weights and reference times.
+  hyrox_division text not null default 'open_men'
+    check (hyrox_division in ('open_men', 'open_women', 'pro_men', 'pro_women'))
 );
 insert into athlete (id) values (1) on conflict do nothing;
 
--- Every session: Strava activities, SkiErg photo logs and manual entries.
+-- Every session: Strava activities, erg photo logs, HYROX sims/races and manual entries.
+-- sport is the Strava sport_type, or 'SkiErg' / 'RowErg' / 'BikeErg' / 'HYROX' for logged sessions.
+-- HYROX sessions keep their splits in details: { kind, runs[8], stations{...}, roxzone_s }.
 create table if not exists activities (
   id uuid primary key default gen_random_uuid(),
   source text not null check (source in ('strava', 'ski_photo', 'manual')),
@@ -86,10 +91,29 @@ create table if not exists checkins (
   created_at timestamptz default now()
 );
 
+-- HYROX station benchmarks from training (e.g. 100 wall balls in 5:40).
+-- Not counted as training load: the session they were part of already is.
+create table if not exists benchmarks (
+  id uuid primary key default gen_random_uuid(),
+  date date not null,
+  station text not null check (station in ('ski', 'sled_push', 'sled_pull', 'bbj', 'row', 'farmers', 'lunges', 'wall_balls')),
+  time_s numeric not null,
+  amount numeric,          -- metres (or reps for wall balls); blank = race distance
+  load_kg numeric,         -- sled total / per-hand kettlebell / sandbag / ball weight
+  fresh boolean not null default true, -- false if done straight after running
+  notes text,
+  created_at timestamptz default now()
+);
+create index if not exists benchmarks_station_idx on benchmarks (station, date desc);
+
+-- Upgrades for databases created from an earlier version of this file.
+alter table athlete add column if not exists hyrox_division text not null default 'open_men';
+
 alter table strava_auth enable row level security;
 alter table athlete enable row level security;
 alter table activities enable row level security;
 alter table checkins enable row level security;
+alter table benchmarks enable row level security;
 
 -- Private bucket for SkiErg monitor photos.
 insert into storage.buckets (id, name, public)

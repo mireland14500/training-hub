@@ -3,6 +3,7 @@ import { PmcChart, WeeklyLoadChart, WellnessChart } from "@/components/Charts";
 import SyncButton from "@/components/SyncButton";
 import { formatDuration, HR_ZONE_NAMES } from "@/lib/analysis";
 import { dashboardData, localDate } from "@/lib/data";
+import type { PlanAdvice, Verdict } from "@/lib/plan";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,54 @@ function Ring({ score, color }: { score: number; color: string }) {
       <circle cx="60" cy="60" r={r} fill="none" stroke="var(--border)" strokeWidth="10" />
       <circle cx="60" cy="60" r={r} fill="none" stroke={color} strokeWidth="10" strokeLinecap="round" strokeDasharray={`${(score / 100) * c} ${c}`} />
     </svg>
+  );
+}
+
+const VERDICT: Record<Verdict, { label: string; color: string }> = {
+  add: { label: "ADD", color: "var(--good)" },
+  maintain: { label: "HOLD", color: "var(--c-ctl)" },
+  reduce: { label: "REDUCE", color: "var(--warn)" },
+  deload: { label: "DELOAD", color: "var(--bad)" },
+  taper: { label: "TAPER", color: "var(--c-ski)" },
+};
+const ACTION_ICON = { add: "＋", drop: "−", swap: "⇄", keep: "✓" };
+
+function PlanCard({ plan }: { plan: PlanAdvice }) {
+  const v = VERDICT[plan.verdict];
+  const max = Math.max(plan.target.high * 1.15, plan.weekSoFar);
+  const pct = (x: number) => `${Math.min(100, (x / max) * 100)}%`;
+  return (
+    <div className="card">
+      <div className="flex items-center justify-between gap-2">
+        <div className="label">This week</div>
+        <span className="rounded-full px-2.5 py-0.5 text-xs font-bold text-white" style={{ background: v.color }}>{v.label}</span>
+      </div>
+      <div className="mt-1 text-lg font-bold">{plan.headline}</div>
+      <ul className="mt-1 space-y-0.5 text-sm text-muted">
+        {plan.reasons.map((r) => <li key={r}>{r}</li>)}
+      </ul>
+      <ul className="mt-3 space-y-2">
+        {plan.suggestions.map((s) => (
+          <li key={s.session} className="flex gap-2 rounded-xl bg-bg p-2.5 text-sm">
+            <span className="w-4 shrink-0 text-center font-bold" style={{ color: v.color }}>{ACTION_ICON[s.action]}</span>
+            <div>
+              <div className="font-semibold">{s.session}</div>
+              <div className="text-xs text-muted">{s.why}</div>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <div className="mt-3">
+        <div className="flex justify-between text-xs text-muted">
+          <span>Weekly load so far: <b className="tabular text-text">{plan.weekSoFar}</b></span>
+          <span className="tabular">target {plan.target.low}–{plan.target.high} · {plan.daysLeft} day{plan.daysLeft === 1 ? "" : "s"} left</span>
+        </div>
+        <div className="relative mt-1 h-2.5 rounded-full bg-border">
+          <div className="absolute inset-y-0 rounded-full opacity-30" style={{ left: pct(plan.target.low), width: `calc(${pct(plan.target.high)} - ${pct(plan.target.low)})`, background: v.color }} />
+          <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: pct(plan.weekSoFar), background: v.color }} />
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -53,10 +102,13 @@ export default async function Dashboard() {
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Recovery</h1>
+          <h1 className="text-2xl font-bold">Today</h1>
           <p className="text-sm text-muted">{d.lastSync ? `Synced ${new Date(d.lastSync).toLocaleString()}` : "Not synced yet"}</p>
         </div>
-        <SyncButton />
+        <div className="flex items-start gap-2">
+          <SyncButton />
+          <Link href="/settings" className="btn-ghost px-3 text-sm md:hidden" aria-label="Settings">⚙︎</Link>
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-[1fr_1.4fr]">
@@ -82,8 +134,18 @@ export default async function Dashboard() {
           </div>
         </div>
 
+        <PlanCard plan={d.plan} />
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-[1fr_1.4fr]">
+        <Link href="/hyrox" className="card block transition hover:border-accent">
+          <div className="label">Predicted HYROX time</div>
+          <div className="tabular mt-1 text-4xl font-bold">{formatDuration(d.prediction.total)}</div>
+          <div className="tabular text-sm text-muted">range {formatDuration(d.prediction.low)} – {formatDuration(d.prediction.high)}</div>
+          <div className="mt-2 text-xs text-muted">{Math.round(d.prediction.confidence * 100)}% from your own data · see breakdown →</div>
+        </Link>
         <div className="card">
-          <div className="label mb-2">Today&apos;s guidance</div>
+          <div className="label mb-2">Today</div>
           <ul className="space-y-2">
             {d.cues.map((c) => (
               <li key={c} className="flex gap-2 text-sm"><span className="text-accent">●</span>{c}</li>
@@ -102,6 +164,22 @@ export default async function Dashboard() {
         <Stat label="Fatigue (ATL)" value={String(Math.round(d.today?.atl ?? 0))} hint="7-day load" />
         <Stat label="Form (TSB)" value={`${tsb > 0 ? "+" : ""}${Math.round(tsb)}`} hint={tsb < -25 ? "Very tired" : tsb < -10 ? "Productive fatigue" : tsb > 15 ? "Very fresh" : "Balanced"} tone={tsb < -25 ? "var(--bad)" : tsb > 5 ? "var(--good)" : undefined} />
         <Stat label="Acute:Chronic" value={d.acwr?.toFixed(2) ?? "–"} hint="Sweet spot 0.8–1.3" tone={acwrTone} />
+      </div>
+
+      <div className="card">
+        <div className="label mb-2">Session mix — last 14 days</div>
+        <div className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
+          {d.plan.mix.map((m) => (
+            <div key={m.label} className="flex items-center justify-between gap-2 text-sm">
+              <span>{m.label}</span>
+              <span className="tabular flex items-center gap-2">
+                <b>{m.count}</b>
+                <span className="text-xs text-muted">aim {m.ideal[0]}–{m.ideal[1]}</span>
+                <span className="h-2 w-2 rounded-full" style={{ background: m.status === "ok" ? "var(--good)" : "var(--warn)" }} />
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="card">

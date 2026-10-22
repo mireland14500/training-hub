@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Training Hub",
-  description: "Recovery, running analysis and SkiErg logging from Strava",
+  description: "HYROX prediction, fitness progress and training-load advice from Strava",
   appleWebApp: { capable: true, title: "Training Hub", statusBarStyle: "black-translucent" },
   icons: { icon: "/icons/icon-192.png", apple: "/apple-touch-icon.png" },
 };

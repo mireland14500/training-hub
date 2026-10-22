@@ -61,7 +61,9 @@ export async function saveSettings(form: FormData) {
     race_date: str(form, "race_date"),
     goal_name: str(form, "goal_name"),
     goal_date: str(form, "goal_date"),
-    goal_distance_m: num(form, "goal_distance_m"),
+    hyrox_division: ["open_men", "open_women", "pro_men", "pro_women"].includes(String(form.get("hyrox_division")))
+      ? String(form.get("hyrox_division"))
+      : before.hyrox_division,
   };
   const { error } = await db().from("athlete").upsert(row);
   if (error) throw error;
@@ -72,26 +74,35 @@ export async function saveSettings(form: FormData) {
   redirect("/settings?saved=1");
 }
 
-export async function saveSkiSession(form: FormData) {
+/** HR data from the Garmin/Strava recording of the same session, if the user linked one. */
+async function linkedHr(linkedId: string | null) {
+  if (!linkedId) return { avg_hr: null, max_hr: null, zone_seconds: null };
+  const { data } = await db().from("activities").select("avg_hr, max_hr, zone_seconds").eq("id", linkedId).single();
+  return { avg_hr: data?.avg_hr ?? null, max_hr: data?.max_hr ?? null, zone_seconds: data?.zone_seconds ?? null };
+}
+
+/** Saves a logged session; a linked Garmin recording of it stops counting separately. */
+async function insertLogged(row: Record<string, unknown>, linkedId: string | null) {
+  const { error } = await db().from("activities").insert({ ...row, linked_activity_id: linkedId, streams_fetched: true });
+  if (error) throw error;
+  if (linkedId) await db().from("activities").update({ excluded: true }).eq("id", linkedId);
+  revalidatePath("/", "layout");
+}
+
+const MACHINES = ["SkiErg", "RowErg", "BikeErg"];
+
+export async function saveErgSession(form: FormData) {
   const athlete = await getAthlete();
   const durationS = duration(form, "time");
   if (!durationS) throw new Error("Time is required");
+  const machine = MACHINES.includes(String(form.get("machine"))) ? String(form.get("machine")) : "SkiErg";
   const distance = num(form, "distance_m");
   const watts = num(form, "avg_watts");
   const pace500 = duration(form, "pace_500") ?? (distance ? (durationS / distance) * 500 : watts ? pace500FromWatts(watts) : null);
   const rpe = num(form, "rpe");
   const linkedId = str(form, "linked_activity_id");
-
-  // Use HR from the linked Garmin/Strava recording if one is chosen and no HR was typed.
-  let avgHr = num(form, "avg_hr");
-  let maxHr: number | null = null;
-  let zoneSeconds: number[] | null = null;
-  if (linkedId) {
-    const { data: linked } = await db().from("activities").select("avg_hr, max_hr, zone_seconds").eq("id", linkedId).single();
-    avgHr ??= linked?.avg_hr ?? null;
-    maxHr = linked?.max_hr ?? null;
-    zoneSeconds = linked?.zone_seconds ?? null;
-  }
+  const hr = await linkedHr(linkedId);
+  const avgHr = num(form, "avg_hr") ?? hr.avg_hr;
   const { load, method } = sessionLoad({ duration_s: durationS, avg_hr: avgHr, rpe }, athlete);
 
   let splits: unknown = [];
@@ -99,35 +110,98 @@ export async function saveSkiSession(form: FormData) {
     splits = JSON.parse(String(form.get("splits") ?? "[]"));
   } catch {}
 
-  const { error } = await db().from("activities").insert({
-    source: str(form, "photo_path") ? "ski_photo" : "manual",
-    sport: "SkiErg",
-    name: str(form, "name") ?? `SkiErg ${str(form, "workout") ?? ""}`.trim(),
-    // Browser-computed ISO time, so the session lands on the right local day.
-    start_time: str(form, "start_iso") ?? new Date().toISOString(),
-    duration_s: Math.round(durationS),
-    moving_s: Math.round(durationS),
-    distance_m: distance,
-    avg_hr: avgHr,
-    max_hr: maxHr,
-    avg_speed: distance ? distance / durationS : null,
-    avg_watts: watts,
-    calories: num(form, "calories"),
-    rpe,
-    load,
-    load_method: method,
-    zone_seconds: zoneSeconds,
-    details: { workout: str(form, "workout"), pace_500m_s: pace500, stroke_rate: num(form, "stroke_rate"), splits },
-    photo_path: str(form, "photo_path"),
-    linked_activity_id: linkedId,
+  await insertLogged(
+    {
+      source: str(form, "photo_path") ? "ski_photo" : "manual",
+      sport: machine,
+      name: `${machine} ${str(form, "workout") ?? ""}`.trim(),
+      // Browser-computed ISO time, so the session lands on the right local day.
+      start_time: str(form, "start_iso") ?? new Date().toISOString(),
+      duration_s: Math.round(durationS),
+      moving_s: Math.round(durationS),
+      distance_m: distance,
+      avg_hr: avgHr,
+      max_hr: hr.max_hr,
+      avg_speed: distance ? distance / durationS : null,
+      avg_watts: watts,
+      calories: num(form, "calories"),
+      rpe,
+      load,
+      load_method: method,
+      zone_seconds: hr.zone_seconds,
+      details: { workout: str(form, "workout"), pace_500m_s: pace500, stroke_rate: num(form, "stroke_rate"), splits },
+      photo_path: str(form, "photo_path"),
+      notes: str(form, "notes"),
+    },
+    linkedId,
+  );
+  redirect("/ergs");
+}
+
+const STATION_KEYS = ["ski", "sled_push", "sled_pull", "bbj", "row", "farmers", "lunges", "wall_balls"];
+const HYROX_KINDS = ["race", "full_sim", "half_sim", "custom"];
+
+export async function saveHyroxSession(form: FormData) {
+  const athlete = await getAthlete();
+  const kind = HYROX_KINDS.includes(String(form.get("kind"))) ? String(form.get("kind")) : "full_sim";
+  const runs = Array.from({ length: 8 }, (_, i) => duration(form, `run_${i + 1}`));
+  const stations = Object.fromEntries(STATION_KEYS.map((k) => [k, duration(form, `st_${k}`)]));
+  const roxzone = duration(form, "roxzone");
+  const parts = [...runs, ...Object.values(stations), roxzone].filter((x): x is number => x !== null);
+  const total = duration(form, "total") ?? (parts.length ? parts.reduce((a, b) => a + b, 0) : null);
+  if (!total) throw new Error("Enter the total time or at least one split");
+
+  const rpe = num(form, "rpe");
+  const linkedId = str(form, "linked_activity_id");
+  const hr = await linkedHr(linkedId);
+  const avgHr = num(form, "avg_hr") ?? hr.avg_hr;
+  const { load, method } = sessionLoad({ duration_s: total, avg_hr: avgHr, rpe }, athlete);
+  const label = { race: "HYROX race", full_sim: "HYROX full sim", half_sim: "HYROX half sim", custom: "HYROX workout" }[kind];
+
+  await insertLogged(
+    {
+      source: str(form, "photo_path") ? "ski_photo" : "manual",
+      sport: "HYROX",
+      name: str(form, "name") ?? label,
+      start_time: str(form, "start_iso") ?? new Date().toISOString(),
+      duration_s: Math.round(total),
+      moving_s: Math.round(total),
+      avg_hr: avgHr,
+      max_hr: hr.max_hr,
+      rpe,
+      load,
+      load_method: method,
+      zone_seconds: hr.zone_seconds,
+      details: { kind, runs, stations, roxzone_s: roxzone },
+      photo_path: str(form, "photo_path"),
+      notes: str(form, "notes"),
+    },
+    linkedId,
+  );
+  redirect("/hyrox");
+}
+
+export async function saveBenchmark(form: FormData) {
+  const station = String(form.get("station"));
+  const time = duration(form, "time");
+  if (!STATION_KEYS.includes(station) || !time) throw new Error("Pick a station and enter a time");
+  const { error } = await db().from("benchmarks").insert({
+    date: str(form, "date") ?? new Date().toISOString().slice(0, 10),
+    station,
+    time_s: time,
+    amount: num(form, "amount"),
+    load_kg: num(form, "load_kg"),
+    fresh: form.get("fresh") !== "no",
     notes: str(form, "notes"),
-    streams_fetched: true,
   });
   if (error) throw error;
-  // The Garmin recording of the same session no longer counts separately.
-  if (linkedId) await db().from("activities").update({ excluded: true }).eq("id", linkedId);
   revalidatePath("/", "layout");
-  redirect("/ski");
+  redirect(form.get("again") ? "/log/station?saved=1" : "/hyrox");
+}
+
+export async function deleteBenchmark(id: string) {
+  await db().from("benchmarks").delete().eq("id", id);
+  revalidatePath("/", "layout");
 }
 
 export async function setRpe(id: string, rpe: number) {

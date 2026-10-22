@@ -1,18 +1,17 @@
 # Training Hub
 
-A personal training app for phone and desktop. It pulls your Garmin runs in through Strava, reads SkiErg sessions from a photo of the monitor, and gives you:
+A personal HYROX training analyser for phone and desktop. It answers three questions:
 
-- **Recovery dashboard**
-  - A readiness score (0–100) that combines form (TSB) with your morning Garmin numbers: HRV, resting HR, sleep score and Body Battery.
-  - A Fitness / Fatigue / Form chart.
-  - Acute:chronic load ratio, intensity split across HR zones, weekly load by sport, and plain-language guidance for today.
-- **Running analysis**
-  - Threshold pace estimated from critical speed and your best efforts, or from a recent race.
-  - VDOT, Daniels training paces, race predictions and a threshold trend.
-  - Weekly volume, aerobic efficiency on easy runs, and aerobic decoupling on long runs.
-- **SkiErg logging**
-  - Snap the PM5 monitor and the app fills in time, metres, calories, pace, watts, stroke rate and splits. Check the numbers, add RPE, save.
-  - If you also recorded the session on your watch, link the two. The app then uses that heart rate, and the session isn't counted twice.
+1. **Am I getting fitter?** The Progress page tracks predicted HYROX time, threshold pace, VDOT, training fitness, easy-run efficiency, SkiErg and Row 1 km times, and station benchmarks. It shows the change over the last 6 and 12 weeks and gives an overall verdict.
+2. **What would my HYROX time be?** The HYROX page predicts your finish time segment by segment and ranks where you'd gain the most time.
+3. **Should I train more or less this week?** The Today page gives weekly advice (**ADD / HOLD / REDUCE / DELOAD / TAPER**). It's based on training load, fatigue, readiness and days to your race. It also gives a weekly load target, checks your session mix (runs, quality runs, strength/stations, sims, ergs) and suggests which session to add or drop.
+
+Data comes from:
+- Your Garmin, through Strava.
+- Erg sessions logged from a photo of the monitor.
+- HYROX sims and races logged by hand, or from a results screenshot.
+- Station benchmarks (e.g. 100 wall balls in 5:40).
+- A 20-second morning check-in with your Garmin HRV, sleep and Body Battery.
 
 It's a **Progressive Web App (PWA)**: open the URL on your phone and choose *Add to Home Screen* to get it as an app.
 
@@ -40,7 +39,7 @@ Garmin doesn't share HRV, sleep or Body Battery with Strava. Garmin's own Health
    - Later, your Vercel domain (for example `training-hub-you.vercel.app`).
 3. Copy the **Client ID** and **Client Secret**.
 
-### 3. Anthropic API key (for reading monitor photos)
+### 3. Anthropic API key (for reading photos)
 Create a key at <https://console.anthropic.com>. Each photo costs a fraction of a cent.
 
 ### 4. Run locally
@@ -69,9 +68,43 @@ npm run dev
 ### 6. First things to set in Settings
 - **Max HR, resting HR and threshold HR.** Your Epix shows an estimated lactate threshold under *Performance Stats*.
 - **A recent race (optional).** It's the most accurate source for paces and predictions.
-- **A goal race (optional).** It adds a countdown and a predicted time.
+- **HYROX division and next race date.** These set race weights, reference times and taper timing.
 
-## How the numbers are calculated
+## How the HYROX prediction works
+
+Race = 8 × 1 km run + 8 stations + Roxzone. Each segment uses your most recent evidence from the last 120 days:
+
+| Segment | Source (best first) |
+|---|---|
+| Runs | Your open 10K pace (from running fitness) × a "compromised running" slowdown. The slowdown is measured from your latest sim or race with run splits; the default is +12%. |
+| SkiErg / Row | Latest sim/race split, or your best 1 km equivalent from erg logs (Paul's law: +5 s/500 m per doubling of distance) + 6% race fatigue. |
+| Other stations | Latest sim/race split, or your best benchmark scaled to race distance/reps and race weight, + 10% if it was done fresh. |
+| Roxzone | From your latest full sim or race. |
+| No data | Typical time for your division, shown in amber so you know which segments to benchmark. |
+
+The likely range widens for segments that rely on typical times. The reference "typical" and "top ~15%" splits are rough guides from public results; your own data always replaces them.
+
+## How the weekly advice works
+
+| Verdict | When |
+|---|---|
+| TAPER | Race within 10 days |
+| DELOAD | Acute:chronic > 1.5, form < −30, or 3-day readiness average < 45 |
+| REDUCE | Acute:chronic > 1.3, form < −20, readiness average < 55, or 3 straight build weeks with readiness below 65 |
+| ADD | Acute:chronic < 0.9, form > −5 and readiness ≥ 65 |
+| HOLD | Everything else |
+
+The weekly load target is your chronic weekly load (fitness × 7) × a multiplier for the verdict.
+
+When you can add a session, the app suggests the most useful one, in this order:
+1. Compromised running, if you've done no HYROX-specific work in 14 days.
+2. Station strength.
+3. A long run.
+4. A threshold run.
+5. Erg intervals.
+6. An easy run.
+
+## Other calculations
 
 | Metric | Method |
 |---|---|
@@ -88,15 +121,17 @@ npm run dev
 
 ## Project layout
 ```
-app/                pages (Recovery, Running, SkiErg, Log, Settings, Check-in) and API routes
+app/                pages (Today, HYROX, Progress, Running, Log, Ergs, Settings, Check-in) and API routes
 app/actions.ts      server actions (save check-in, settings, ski sessions)
 lib/analysis.ts     all training-science maths (pure functions, unit tested)
 lib/data.ts         loads and aggregates data for each page
 lib/strava.ts       Strava OAuth and API client
 lib/sync.ts         import, stream analysis, webhook handling
-lib/ski-vision.ts   reads monitor photos with Claude (structured output)
+lib/hyrox.ts        HYROX race model and prediction (pure, unit tested)
+lib/plan.ts         weekly add/hold/reduce advice (pure, unit tested)
+lib/vision.ts       reads erg monitors and HYROX result screenshots with Claude
 supabase/schema.sql database schema
-tests/              unit tests for the analysis maths (npm test)
+tests/              unit tests (npm test)
 ```
 
 ## Ideas for later

@@ -58,6 +58,18 @@ export interface AthleteRow {
   goal_name: string | null;
   goal_date: string | null;
   goal_distance_m: number | null;
+  hyrox_division: "open_men" | "open_women" | "pro_men" | "pro_women";
+}
+
+export interface BenchmarkRow {
+  id: string;
+  date: string;
+  station: "ski" | "sled_push" | "sled_pull" | "bbj" | "row" | "farmers" | "lunges" | "wall_balls";
+  time_s: number;
+  amount: number | null;
+  load_kg: number | null;
+  fresh: boolean;
+  notes: string | null;
 }
 
 export interface CheckinRow {

@@ -2,6 +2,7 @@ import { saveSettings } from "@/app/actions";
 import SyncButton from "@/components/SyncButton";
 import { formatDuration, formatPace } from "@/lib/analysis";
 import { db, getAthlete } from "@/lib/db";
+import { DIVISIONS } from "@/lib/hyrox";
 
 export const dynamic = "force-dynamic";
 
@@ -60,6 +61,7 @@ export default async function Settings({ searchParams }: { searchParams: Promise
 
         <div className="card space-y-3">
           <div className="label">Running fitness</div>
+          <p className="text-xs text-muted">Your 1 km HYROX run splits are predicted from this.</p>
           <Num name="threshold_pace_override" label="Threshold pace override (/km)" value={a.threshold_pace_override ? formatPace(a.threshold_pace_override) : null} hint="Leave blank to estimate automatically from your runs. Format m:ss." />
           <div className="grid grid-cols-3 gap-3">
             <Num name="race_distance_m" label="Race (m)" value={a.race_distance_m} hint="e.g. 10000" />
@@ -69,19 +71,28 @@ export default async function Settings({ searchParams }: { searchParams: Promise
               <input className="input mt-1" type="date" name="race_date" defaultValue={a.race_date ?? ""} />
             </label>
           </div>
-          <p className="text-xs text-muted">A race in the last 4 months is the most accurate source for paces and predictions.</p>
+          <p className="text-xs text-muted">A running race (5K, 10K…) in the last 4 months is the most accurate source for paces and predictions.</p>
         </div>
 
         <div className="card space-y-3">
-          <div className="label">Goal race</div>
-          <div className="grid grid-cols-3 gap-3">
-            <Num name="goal_name" label="Name" value={a.goal_name} />
-            <Num name="goal_distance_m" label="Distance (m)" value={a.goal_distance_m} />
+          <div className="label">HYROX</div>
+          <label className="block">
+            <span className="label">Division</span>
+            <select name="hyrox_division" defaultValue={a.hyrox_division} className="input mt-1">
+              {Object.entries(DIVISIONS).map(([k, v]) => (
+                <option key={k} value={k}>{v}</option>
+              ))}
+            </select>
+            <span className="mt-0.5 block text-xs text-muted">Sets race weights (for scaling benchmarks) and the reference times you&apos;re compared against.</span>
+          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <Num name="goal_name" label="Next race" value={a.goal_name} hint="e.g. HYROX London" />
             <label className="block">
-              <span className="label">Date</span>
+              <span className="label">Race date</span>
               <input className="input mt-1" type="date" name="goal_date" defaultValue={a.goal_date ?? ""} />
             </label>
           </div>
+          <p className="text-xs text-muted">The race date drives the taper advice and the countdown on Today.</p>
         </div>
 
         <button className="btn-primary w-full">Save settings</button>

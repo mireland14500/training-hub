@@ -78,13 +78,6 @@ export default async function Running() {
                   <td className="tabular py-2 pl-3 text-right text-muted">{formatPace(p.time / (p.m / 1000))}/km</td>
                 </tr>
               ))}
-              {d.goalPrediction && (
-                <tr>
-                  <td className="py-2 font-semibold text-accent">{d.goalPrediction.name}</td>
-                  <td className="tabular py-2 text-right font-semibold text-accent">{formatDuration(d.goalPrediction.time)}</td>
-                  <td />
-                </tr>
-              )}
             </tbody>
           </table>
           <p className="mt-2 text-xs text-muted">Assumes training specific to the distance. Marathon predictions are optimistic without high mileage.</p>

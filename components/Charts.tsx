@@ -61,8 +61,8 @@ export function WeeklyLoadChart({ data }: { data: Record<string, number | string
         <Tooltip {...tooltipStyle} cursor={{ fill: "var(--border)", opacity: 0.4 }} />
         <Legend wrapperStyle={{ fontSize: 12 }} />
         <Bar dataKey="Run" stackId="a" fill="var(--c-run)" />
-        <Bar dataKey="SkiErg" stackId="a" fill="var(--c-ski)" />
-        <Bar dataKey="Ride" stackId="a" fill="var(--c-ride)" />
+        <Bar dataKey="Erg" stackId="a" fill="var(--c-ski)" />
+        <Bar dataKey="HYROX & strength" stackId="a" fill="var(--accent)" />
         <Bar dataKey="Other" stackId="a" fill="var(--c-other)" radius={[4, 4, 0, 0]} />
       </BarChart>
     </ResponsiveContainer>
@@ -140,6 +140,44 @@ export function SkiTrendChart({ data }: { data: { date: string; pace500: number 
         <YAxis {...axis} reversed domain={["dataMin - 3", "dataMax + 3"]} tickFormatter={pace} />
         <Tooltip {...tooltipStyle} formatter={(v) => [`${pace(Number(v))} /500m`, "Avg pace"]} />
         <Line dataKey="pace500" stroke="var(--c-ski)" strokeWidth={2} dot={{ r: 3 }} />
+      </LineChart>
+    </ResponsiveContainer>
+  );
+}
+
+function clock(s: number) {
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = Math.round(s % 60);
+  return h ? `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}` : `${m}:${String(sec).padStart(2, "0")}`;
+}
+
+export function HyroxTrendChart({ data, fast, average }: { data: { date: string; total: number }[]; fast?: number; average?: number }) {
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <LineChart data={data} margin={{ top: 8, right: 8, left: 4, bottom: 0 }}>
+        {grid}
+        <XAxis dataKey="date" {...axis} minTickGap={24} />
+        <YAxis {...axis} reversed domain={["dataMin - 120", "dataMax + 120"]} tickFormatter={clock} width={56} />
+        <Tooltip {...tooltipStyle} formatter={(v) => [clock(Number(v)), "Predicted"]} />
+        {average && <ReferenceLine y={average} stroke="var(--c-other)" strokeDasharray="4 4" label={{ value: "typical", fill: "var(--muted)", fontSize: 10, position: "insideTopRight" }} />}
+        {fast && <ReferenceLine y={fast} stroke="var(--good)" strokeDasharray="4 4" label={{ value: "top ~15%", fill: "var(--muted)", fontSize: 10, position: "insideTopRight" }} />}
+        <Line dataKey="total" stroke="var(--accent)" strokeWidth={2.5} dot={{ r: 3 }} isAnimationActive={false} />
+      </LineChart>
+    </ResponsiveContainer>
+  );
+}
+
+/** Small trend line for one progress metric. "Better" is always drawn upwards. */
+export function MetricSpark({ data, format, lowerIsBetter }: { data: { date: string; value: number | null }[]; format: "time" | "pace" | "number"; lowerIsBetter: boolean }) {
+  const f = (v: number) => (format === "number" ? String(v) : clock(v));
+  return (
+    <ResponsiveContainer width="100%" height={90}>
+      <LineChart data={data} margin={{ top: 6, right: 4, left: 4, bottom: 0 }}>
+        <XAxis dataKey="date" hide />
+        <YAxis hide reversed={lowerIsBetter} domain={["auto", "auto"]} />
+        <Tooltip {...tooltipStyle} formatter={(v) => f(Number(v))} />
+        <Line dataKey="value" stroke="var(--accent)" strokeWidth={2} dot={false} connectNulls isAnimationActive={false} />
       </LineChart>
     </ResponsiveContainer>
   );
