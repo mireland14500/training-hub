@@ -1,0 +1,82 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #f6f7f9;
+  --card: #ffffff;
+  --border: #e3e6eb;
+  --text: #14171c;
+  --muted: #5f6773;
+  --accent: #fc5200; /* Strava orange */
+  --good: #16a34a;
+  --warn: #d97706;
+  --bad: #dc2626;
+  --c-run: #2563eb;
+  --c-ski: #0d9488;
+  --c-ride: #ea580c;
+  --c-other: #8b93a1;
+  --c-ctl: #2563eb;
+  --c-atl: #db2777;
+  --c-tsb: #16a34a;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1014;
+    --card: #161a20;
+    --border: #262c35;
+    --text: #e8ebef;
+    --muted: #8f98a6;
+    --good: #22c55e;
+    --warn: #f59e0b;
+    --bad: #f87171;
+    --c-run: #60a5fa;
+    --c-ski: #2dd4bf;
+    --c-ride: #fb923c;
+    --c-other: #9aa3b2;
+    --c-ctl: #60a5fa;
+    --c-atl: #f472b6;
+    --c-tsb: #4ade80;
+    color-scheme: dark;
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-card: var(--card);
+  --color-border: var(--border);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-good: var(--good);
+  --color-warn: var(--warn);
+  --color-bad: var(--bad);
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@utility card {
+  @apply bg-card border border-border rounded-2xl p-4;
+}
+@utility label {
+  @apply text-xs font-medium uppercase tracking-wide text-muted;
+}
+@utility input {
+  @apply w-full rounded-xl border border-border bg-bg px-3 py-2.5 text-base outline-none focus:border-accent;
+}
+@utility btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 font-semibold transition active:scale-[0.98] disabled:opacity-50;
+}
+@utility btn-primary {
+  @apply btn bg-accent text-white;
+}
+@utility btn-ghost {
+  @apply btn border border-border bg-card;
+}
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}
