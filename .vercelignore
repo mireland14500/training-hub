@@ -1,0 +1,3 @@
+# The Garmin sync runs on your Mac (npm run garmin), not on Vercel.
+scripts/
+.venv-garmin/

@@ -86,6 +86,8 @@ npm run dev
 3. The first sync imports 12 months of activities. Strava limits apps to 100 requests per 15 minutes, so detailed analysis of older runs (HR zones, best efforts) fills in over a few taps of **Sync**.
 
 ### 5. Deploy to Vercel (so it works on your phone)
+`vercel.json` deploys the Next.js app as a single public service (`app`, at `/`). `scripts/` (the Garmin sync) is left out of the upload via `.vercelignore`, because it runs on your Mac.
+
 1. Push this folder to a GitHub repo and import it at [vercel.com/new](https://vercel.com/new).
 2. Add the environment variables from `.env.example`. Set `APP_URL` to your Vercel URL, and set `APP_TIMEZONE` to your zone (e.g. `Europe/London`).
 3. Change the Strava callback domain to the Vercel domain.
