@@ -14,6 +14,10 @@ export default async function Running() {
   }
 
   const zones = hrZoneBounds(d.athlete.threshold_hr);
+  const a = d.athlete;
+  const garmin = [a.garmin_pred_5k, a.garmin_pred_10k, a.garmin_pred_half, a.garmin_pred_marathon].some(Boolean)
+    ? [a.garmin_pred_5k, a.garmin_pred_10k, a.garmin_pred_half, a.garmin_pred_marathon]
+    : [];
 
   return (
     <div className="space-y-4">
@@ -83,17 +87,34 @@ export default async function Running() {
         <div className="card">
           <div className="label mb-2">Race predictions</div>
           <table className="w-full text-sm">
+            {garmin.length > 0 && (
+              <thead className="text-xs text-muted">
+                <tr>
+                  <th />
+                  <th className="text-right font-normal">This app</th>
+                  <th className="text-right font-normal">Garmin</th>
+                </tr>
+              </thead>
+            )}
             <tbody className="divide-y divide-border">
-              {d.predictions.map((p) => (
+              {d.predictions.map((p, i) => (
                 <tr key={p.name}>
                   <td className="py-2">{p.name}</td>
-                  <td className="tabular py-2 text-right font-semibold">{formatDuration(p.time)}</td>
-                  <td className="tabular py-2 pl-3 text-right text-muted">{formatPace(p.time / (p.m / 1000))}/km</td>
+                  <td className="tabular py-2 text-right font-semibold">
+                    {formatDuration(p.time)}
+                    <div className="text-xs font-normal text-muted">{formatPace(p.time / (p.m / 1000))}/km</div>
+                  </td>
+                  {garmin.length > 0 && (
+                    <td className="tabular py-2 pl-3 text-right font-semibold">
+                      {garmin[i] ? formatDuration(garmin[i]!) : "–"}
+                      {garmin[i] && <div className="text-xs font-normal text-muted">{formatPace(garmin[i]! / (p.m / 1000))}/km</div>}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
           </table>
-          <p className="mt-2 text-xs text-muted">Assumes training specific to the distance. Marathon predictions are optimistic without high mileage.</p>
+          <p className="mt-2 text-xs text-muted">Assumes training specific to the distance. Marathon predictions are optimistic without high mileage.{garmin.length > 0 ? " Your HYROX run splits use Garmin's 10K prediction." : ""}</p>
         </div>
       </div>
 

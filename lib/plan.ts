@@ -14,11 +14,14 @@ const STRENGTH = ["WeightTraining", "Workout", "Crossfit", "HighIntensityInterva
  * Session category. Your own "session type" (focus) and the logged contents win over
  * Strava's sport — e.g. a "HIIT" class that was ski + treadmill threshold reps is a run session.
  */
-export function categorize(sport: string, name: string | null, focus?: string | null, entries?: Entry[] | null): Category {
+const GARMIN_RUN = ["running", "treadmill_running", "indoor_running", "track_running", "trail_running", "virtual_run"];
+
+export function categorize(sport: string, name: string | null, focus?: string | null, entries?: Entry[] | null, garminType?: string | null): Category {
   if (focus === "hyrox" || focus === "race") return "hyrox";
   if (focus === "strength") return "strength";
   if (sport === "HYROX" || /hyrox|\bsim\b|compromised|roxzone|wall ?balls?|sled/i.test(name ?? "")) return "hyrox";
-  if (RUN.includes(sport)) return "run";
+  // Garmin knows a treadmill run is a run even when Strava files it as "Workout".
+  if (RUN.includes(sport) || GARMIN_RUN.includes(garminType ?? "")) return "run";
   if (ERG.includes(sport)) return "erg";
   const tags = entryTags(entries);
   if (tags.run) return "run";

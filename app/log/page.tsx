@@ -44,7 +44,7 @@ export default async function Log() {
         <ul className="divide-y divide-border">
           {activities.map((a) => (
             <li key={a.id} className={`flex items-center gap-3 px-4 py-3 text-sm ${a.excluded ? "opacity-50" : ""}`}>
-              <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: CATEGORY_DOT[categorize(a.sport, a.name, a.focus, a.entries)] }} />
+              <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: CATEGORY_DOT[categorize(a.sport, a.name, a.focus, a.entries, a.garmin_type)] }} />
               <div className="min-w-0 flex-1">
                 <Link href={`/session/${a.id}`} className="block truncate font-medium hover:text-accent">{a.name}</Link>
                 <div className="tabular text-xs text-muted">

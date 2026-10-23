@@ -4,6 +4,7 @@ import {
   bestEfforts,
   criticalSpeed,
   formatPace,
+  garminLoadScale,
   hrLoad,
   pace500FromWatts,
   pmc,
@@ -30,6 +31,17 @@ describe("load", () => {
     expect(sessionLoad({ duration_s: 3600, avg_hr: 170 }, athlete).method).toBe("hr");
     expect(sessionLoad({ duration_s: 3600, rpe: 7 }, athlete)).toEqual({ load: 100, method: "rpe" });
     expect(sessionLoad({ duration_s: 3600 }, athlete).method).toBe("duration");
+  });
+});
+
+describe("garmin load", () => {
+  it("prefers Garmin's load, on the app's scale", () => {
+    expect(sessionLoad({ duration_s: 3600, avg_hr: 170, garmin_load: 150, garmin_scale: 0.6 }, athlete)).toEqual({ load: 90, method: "garmin" });
+  });
+  it("calibrates the scale from activities with both HR load and Garmin load", () => {
+    const pairs = [100, 80, 60, 120, 90].map((g) => ({ hrLoad: g * 0.7, garminLoad: g }));
+    expect(garminLoadScale(pairs)).toBeCloseTo(0.7, 3);
+    expect(garminLoadScale(pairs.slice(0, 2))).toBe(0.8); // too few: default
   });
 });
 

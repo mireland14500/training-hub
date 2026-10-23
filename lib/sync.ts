@@ -1,5 +1,5 @@
 import "server-only";
-import { bestEfforts, decoupling, efficiencyFactor, sessionLoad, zoneSeconds, type AthleteProfile } from "./analysis";
+import { bestEfforts, decoupling, efficiencyFactor, garminLoadScale, hrLoad, sessionLoad, zoneSeconds, type AthleteProfile } from "./analysis";
 import { db, getAthlete } from "./db";
 import { getActivity, getStreams, isRun, listActivities, StravaRateLimitError, type StravaActivity } from "./strava";
 
@@ -138,16 +138,51 @@ export async function deleteStravaActivity(externalId: number): Promise<void> {
   await db().from("activities").delete().eq("external_id", externalId).eq("source", "strava");
 }
 
-/** Re-scores load for every activity after HR settings change. */
+/**
+ * Re-scores load for every activity (after HR settings change or a Garmin sync).
+ * Calibrates Garmin's load against HR load first, then writes only changed rows, in batches.
+ */
 export async function recomputeLoads(): Promise<number> {
   const athlete = await getAthlete();
-  const { data, error } = await db().from("activities").select("id, duration_s, moving_s, avg_hr, rpe, suffer_score");
+  const { data, error } = await db()
+    .from("activities")
+    .select("id, source, sport, start_time, duration_s, moving_s, avg_hr, rpe, suffer_score, garmin_load, load, load_method");
   if (error) throw error;
-  for (const a of data ?? []) {
-    const { load, method } = sessionLoad({ duration_s: a.moving_s || a.duration_s, avg_hr: a.avg_hr, rpe: a.rpe, suffer_score: a.suffer_score }, athlete);
-    await db().from("activities").update({ load, load_method: method }).eq("id", a.id);
+  const rows = data ?? [];
+
+  const scale = garminLoadScale(
+    rows
+      .filter((a) => a.garmin_load && a.avg_hr && a.avg_hr > athlete.resting_hr)
+      .map((a) => ({ hrLoad: hrLoad(a.moving_s || a.duration_s, a.avg_hr, athlete), garminLoad: a.garmin_load })),
+  );
+  if (scale !== athlete.garmin_load_scale) await db().from("athlete").update({ garmin_load_scale: scale }).eq("id", 1);
+
+  const changed = [];
+  for (const a of rows) {
+    const { load, method } = sessionLoad(
+      { duration_s: a.moving_s || a.duration_s, avg_hr: a.avg_hr, rpe: a.rpe, suffer_score: a.suffer_score, garmin_load: a.garmin_load, garmin_scale: scale },
+      athlete,
+    );
+    if (load !== a.load || method !== a.load_method) {
+      // Upsert needs the NOT NULL columns even though every row already exists.
+      changed.push({ id: a.id, source: a.source, sport: a.sport, start_time: a.start_time, duration_s: a.duration_s, load, load_method: method });
+    }
   }
-  return data?.length ?? 0;
+  for (let i = 0; i < changed.length; i += 200) {
+    const { error: e } = await db().from("activities").upsert(changed.slice(i, i + 200), { onConflict: "id" });
+    if (e) throw e;
+  }
+  return changed.length;
+}
+
+/** After a Garmin sync (or a Strava re-import), re-score any activity whose Garmin load isn't applied yet. */
+export async function applyGarminLoadsIfNeeded(): Promise<void> {
+  const { count } = await db()
+    .from("activities")
+    .select("id", { count: "exact", head: true })
+    .not("garmin_load", "is", null)
+    .neq("load_method", "garmin");
+  if (count) await recomputeLoads();
 }
 
 /**

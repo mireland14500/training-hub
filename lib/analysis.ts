@@ -41,10 +41,23 @@ export interface LoadInput {
   avg_hr?: number | null;
   rpe?: number | null;
   suffer_score?: number | null;
+  /** Garmin's own training load for the activity (EPOC-based). */
+  garmin_load?: number | null;
+  /** Converts Garmin load to this app's scale (see garminLoadScale). */
+  garmin_scale?: number | null;
 }
 
-/** Picks the best available method: HR > RPE > Strava relative effort > duration. */
+/** Garmin load → app scale when there aren't enough activities with HR to calibrate. */
+export const DEFAULT_GARMIN_SCALE = 0.8;
+
+/**
+ * Picks the best available method: Garmin load > HR > RPE > Strava relative effort > duration.
+ * Garmin's load is EPOC-based, so it captures interval sessions better than average HR does.
+ */
 export function sessionLoad(a: LoadInput, p: AthleteProfile): { load: number; method: string } {
+  if (a.garmin_load && a.garmin_load > 0) {
+    return { load: round(a.garmin_load * (a.garmin_scale ?? DEFAULT_GARMIN_SCALE), 1), method: "garmin" };
+  }
   if (a.avg_hr && a.avg_hr > p.resting_hr) {
     return { load: round(hrLoad(a.duration_s, a.avg_hr, p), 1), method: "hr" };
   }
@@ -52,6 +65,19 @@ export function sessionLoad(a: LoadInput, p: AthleteProfile): { load: number; me
   if (a.suffer_score) return { load: round(a.suffer_score, 1), method: "strava" };
   // Unknown intensity: assume easy aerobic work (~RPE 3).
   return { load: round(rpeLoad(a.duration_s, 3), 1), method: "duration" };
+}
+
+/**
+ * Scale that puts Garmin's training load on this app's scale (~100 = 1 h at threshold),
+ * calibrated on your own activities that have both: the median of HR-load ÷ Garmin load.
+ * Keeps fitness/fatigue history continuous for activities Garmin didn't score.
+ */
+export function garminLoadScale(pairs: { hrLoad: number; garminLoad: number }[]): number {
+  const ratios = pairs.filter((x) => x.hrLoad > 5 && x.garminLoad > 5).map((x) => x.hrLoad / x.garminLoad).sort((a, b) => a - b);
+  if (ratios.length < 5) return DEFAULT_GARMIN_SCALE;
+  const mid = Math.floor(ratios.length / 2);
+  const median = ratios.length % 2 ? ratios[mid] : (ratios[mid - 1] + ratios[mid]) / 2;
+  return round(Math.min(3, Math.max(0.2, median)), 3);
 }
 
 // ---------------------------------------------------------------------------

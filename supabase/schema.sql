@@ -41,9 +41,19 @@ create table if not exists athlete (
   garmin_lt_hr int,            -- lactate threshold heart rate
   garmin_lt_date date,
   garmin_vo2max numeric,
-  garmin_synced_at timestamptz
+  garmin_synced_at timestamptz,
+  -- Garmin race predictor, seconds.
+  garmin_pred_5k int,
+  garmin_pred_10k int,
+  garmin_pred_half int,
+  garmin_pred_marathon int,
+  -- Converts Garmin's per-activity training load to this app's scale (~100 = 1 h at threshold).
+  garmin_load_scale numeric
 );
 insert into athlete (id) values (1) on conflict do nothing;
+
+-- Make the API pick up new columns immediately after an upgrade.
+notify pgrst, 'reload schema';
 
 -- Every session: Strava activities, erg photo logs, HYROX sims/races and manual entries.
 -- sport is the Strava sport_type, or 'SkiErg' / 'RowErg' / 'BikeErg' / 'HYROX' for logged sessions.
@@ -84,6 +94,11 @@ create table if not exists activities (
   -- What you did, entered by hand or read from a photo: [{ exercise, sets, distance_m, reps, time_s,
   -- speed_kmh, incline_pct, weight_kg, notes }] — see lib/workout.ts
   entries jsonb,
+  -- From Garmin Connect (matched by start time): Garmin's training load and Training Effect.
+  garmin_load numeric,
+  garmin_te_aerobic numeric,
+  garmin_te_anaerobic numeric,
+  garmin_type text,
   notes text,
   created_at timestamptz default now()
 );
@@ -129,6 +144,15 @@ alter table athlete add column if not exists garmin_synced_at timestamptz;
 alter table activities add column if not exists trainer boolean not null default false;
 alter table activities add column if not exists focus text;
 alter table activities add column if not exists entries jsonb;
+alter table activities add column if not exists garmin_load numeric;
+alter table activities add column if not exists garmin_te_aerobic numeric;
+alter table activities add column if not exists garmin_te_anaerobic numeric;
+alter table activities add column if not exists garmin_type text;
+alter table athlete add column if not exists garmin_pred_5k int;
+alter table athlete add column if not exists garmin_pred_10k int;
+alter table athlete add column if not exists garmin_pred_half int;
+alter table athlete add column if not exists garmin_pred_marathon int;
+alter table athlete add column if not exists garmin_load_scale numeric;
 
 alter table strava_auth enable row level security;
 alter table athlete enable row level security;
@@ -140,3 +164,6 @@ alter table benchmarks enable row level security;
 insert into storage.buckets (id, name, public)
 values ('ski-photos', 'ski-photos', false)
 on conflict do nothing;
+
+-- Make the API pick up new columns immediately after an upgrade.
+notify pgrst, 'reload schema';

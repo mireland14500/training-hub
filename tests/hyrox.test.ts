@@ -73,6 +73,28 @@ describe("prediction", () => {
     expect(p.segments.find((s) => s.key === "roxzone")!.time).toBe(400);
   });
 
+  it("uses an older race for segments with no recent data", () => {
+    const malaga = {
+      date: "2026-04-12",
+      tenKPaceAtTime: 230,
+      splits: {
+        kind: "race" as const,
+        runs: Array(8).fill(262),
+        stations: { ski: 250, sled_push: 160, sled_pull: 230, bbj: 220, row: 255, farmers: 95, lunges: 220, wall_balls: 280 },
+        roxzone_s: 330,
+      },
+    };
+    const p = predictHyrox({ ...base, asOf: "2026-10-23", tenKPace: 230, hyroxSessions: [malaga] });
+    const wb = p.segments.find((s) => s.key === "wall_balls")!;
+    expect(wb.time).toBe(280);
+    expect(wb.stale).toBe(true);
+    expect(wb.detail).toMatch(/race 2026-04-12 \(6 months ago\)/);
+    expect(p.runPenalty).toBeCloseTo(262 / 230 - 1, 5);
+    // Same fitness as on race day → reproduces the race: 8 × 262 + stations + roxzone.
+    expect(p.total).toBeCloseTo(8 * 262 + 1710 + 330, 5);
+    expect(p.confidence).toBe(1);
+  });
+
   it("ignores data older than the window", () => {
     const p = predictHyrox({ ...base, benchmarks: [{ date: "2025-01-01", station: "row", time_s: 200, amount: null, load_kg: null, fresh: true }] });
     expect(p.segments.find((s) => s.key === "row")!.source).toBe("reference");

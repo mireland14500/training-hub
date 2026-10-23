@@ -5,7 +5,9 @@ What it imports:
   * Daily check-in fields: overnight HRV, sleep score + hours, resting HR,
     Body Battery at wake, Garmin Training Readiness (your soreness/energy
     entries are left alone).
-  * Garmin's running lactate threshold (pace + heart rate) and VO2max.
+  * Garmin's running lactate threshold (pace + heart rate), VO2max and race predictions.
+  * Per-activity training load, Training Effect and activity type, matched to the
+    activities already imported from Strava (by start time).
 
 Garmin has no public API for individuals, so this uses the unofficial
 `garminconnect` library and logs in as you. Your password is only used for the
@@ -25,6 +27,7 @@ import json
 import os
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -92,6 +95,16 @@ class Supabase:
 
     def update_athlete(self, fields: dict) -> None:
         self.request("PATCH", "/athlete?id=eq.1", fields)
+
+    def activities_between(self, start_iso: str, end_iso: str) -> list[dict]:
+        q = urllib.parse.urlencode(
+            [("select", "id,start_time,duration_s"), ("start_time", f"gte.{start_iso}"), ("start_time", f"lte.{end_iso}")]
+        )
+        rows = self.request("GET", f"/activities?{q}", prefer="")
+        return rows if isinstance(rows, list) else []
+
+    def update_activity(self, activity_id: str, fields: dict) -> None:
+        self.request("PATCH", f"/activities?id=eq.{urllib.parse.quote(activity_id)}", fields)
 
     def last_garmin_sync(self) -> str | None:
         rows = self.request("GET", "/athlete?id=eq.1&select=garmin_synced_at", prefer="")
@@ -193,6 +206,55 @@ def threshold_and_vo2max(api: Garmin) -> dict:
     return fields
 
 
+def race_predictions(api: Garmin) -> dict:
+    data = safe("race predictions", api.get_race_predictions)
+    entry = data[-1] if isinstance(data, list) and data else data if isinstance(data, dict) else {}
+    keys = {"time5K": "garmin_pred_5k", "time10K": "garmin_pred_10k", "timeHalfMarathon": "garmin_pred_half", "timeMarathon": "garmin_pred_marathon"}
+    return {col: round(entry[k]) for k, col in keys.items() if num((entry or {}).get(k))}
+
+
+TREADMILL_TYPES = {"treadmill_running", "indoor_running", "virtual_run"}
+
+
+def parse_gmt(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def match_activities(api: Garmin, db: Supabase, days: int) -> tuple[int, int]:
+    """Copies Garmin's load / Training Effect onto the matching Strava activities (start within 3 min)."""
+    end = date.today()
+    start = end - timedelta(days=days)
+    garmin = safe("activities", api.get_activities_by_date, start.isoformat(), end.isoformat()) or []
+    ours = db.activities_between(f"{start.isoformat()}T00:00:00Z", f"{(end + timedelta(days=1)).isoformat()}T23:59:59Z")
+    parsed = [(o, datetime.fromisoformat(o["start_time"].replace("Z", "+00:00"))) for o in ours if o.get("start_time")]
+
+    matched = 0
+    for g in garmin:
+        t = parse_gmt(g.get("startTimeGMT"))
+        if not t:
+            continue
+        best = min(parsed, key=lambda p: abs((p[1] - t).total_seconds()), default=None)
+        if not best or abs((best[1] - t).total_seconds()) > 180:
+            continue
+        type_key = (g.get("activityType") or {}).get("typeKey")
+        fields = {
+            "garmin_load": num(g.get("activityTrainingLoad")),
+            "garmin_te_aerobic": num(g.get("aerobicTrainingEffect")),
+            "garmin_te_anaerobic": g.get("anaerobicTrainingEffect") if isinstance(g.get("anaerobicTrainingEffect"), (int, float)) else None,
+            "garmin_type": type_key,
+        }
+        if type_key in TREADMILL_TYPES:
+            fields["trainer"] = True
+        db.update_activity(best[0]["id"], {k: v for k, v in fields.items() if v is not None})
+        matched += 1
+    return matched, len(garmin)
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -229,9 +291,14 @@ def main() -> None:
             imported += 1
             print(f"  {d}  " + "  ".join(f"{k}={v}" for k, v in row.items()))
 
+    first_run = not db.last_garmin_sync()
     fields = threshold_and_vo2max(api)
+    fields.update(race_predictions(api))
     fields["garmin_synced_at"] = datetime.now(timezone.utc).isoformat()
     db.update_athlete(fields)
+
+    # A year of activities on the first run (one request), then a rolling window.
+    matched, total = match_activities(api, db, 365 if first_run else max(days, 14))
 
     print(f"\nDone: {imported} day(s) of recovery data.")
     if "garmin_lt_speed" in fields:
@@ -241,6 +308,12 @@ def main() -> None:
         print("No lactate threshold found on Garmin (run the guided LT test on your watch to get one).")
     if "garmin_vo2max" in fields:
         print(f"VO2max: {fields['garmin_vo2max']}")
+    preds = [(label, fields[col]) for label, col in (("5K", "garmin_pred_5k"), ("10K", "garmin_pred_10k"), ("Half", "garmin_pred_half"), ("Marathon", "garmin_pred_marathon")) if col in fields]
+    if preds:
+        print("Race predictor: " + "  ".join(f"{label} {v // 3600}:{v % 3600 // 60:02d}:{v % 60:02d}" if v >= 3600 else f"{label} {v // 60}:{v % 60:02d}" for label, v in preds))
+    print(f"Training load: matched {matched} of {total} Garmin activities to your Strava sessions.")
+    if total and matched < total:
+        print("  (Unmatched ones aren't on Strava yet — sync Strava in the app, then run this again.)")
 
 
 if __name__ == "__main__":

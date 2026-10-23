@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { categorize } from "@/lib/plan";
 import {
   addEntryVolumes,
+  bestTemplate,
   benchmarksFromEntries,
   emptyVolumes,
   entryPace,
@@ -78,5 +79,34 @@ describe("input handling", () => {
   });
   it("summarises a session", () => {
     expect(summarize(thresholdClass)).toBe("4×500 m SkiErg · 4×4:00 Treadmill @ 15 km/h");
+  });
+});
+
+describe("same as last week", () => {
+  const tpl = (over: Partial<import("@/lib/workout").Template>) => ({
+    id: "x",
+    name: "Evening HIIT",
+    sport: "HighIntensityIntervalTraining",
+    date: "2026-10-15",
+    weekday: 4,
+    hour: 18,
+    entries: thresholdClass,
+    focus: "threshold",
+    ...over,
+  });
+  const target = { id: "t", name: "Evening HIIT", sport: "HighIntensityIntervalTraining", date: "2026-10-22", weekday: 4, hour: 18 };
+
+  it("matches last week's class and prefers the most recent", () => {
+    const t = bestTemplate(target, [tpl({ id: "a", date: "2026-10-08" }), tpl({ id: "b", date: "2026-10-15" })]);
+    expect(t?.id).toBe("b");
+  });
+  it("matches by weekday and time when Garmin names differ", () => {
+    expect(bestTemplate(target, [tpl({ id: "a", name: "Gym class" })])?.id).toBe("a");
+  });
+  it("doesn't match an unrelated session", () => {
+    expect(bestTemplate(target, [tpl({ id: "a", name: "Strength", sport: "WeightTraining", weekday: 1, hour: 7 })])).toBeNull();
+  });
+  it("never suggests a later session or one without details", () => {
+    expect(bestTemplate(target, [tpl({ id: "a", date: "2026-10-29" }), tpl({ id: "b", entries: [] })])).toBeNull();
   });
 });

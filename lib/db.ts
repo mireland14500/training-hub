@@ -46,6 +46,10 @@ export interface ActivityRow {
   trainer: boolean;
   focus: string | null;
   entries: import("./workout").Entry[] | null;
+  garmin_load: number | null;
+  garmin_te_aerobic: number | null;
+  garmin_te_anaerobic: number | null;
+  garmin_type: string | null;
   notes: string | null;
 }
 
@@ -67,6 +71,11 @@ export interface AthleteRow {
   garmin_lt_date: string | null;
   garmin_vo2max: number | null;
   garmin_synced_at: string | null;
+  garmin_pred_5k: number | null;
+  garmin_pred_10k: number | null;
+  garmin_pred_half: number | null;
+  garmin_pred_marathon: number | null;
+  garmin_load_scale: number | null;
 }
 
 export interface BenchmarkRow {

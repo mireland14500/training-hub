@@ -33,8 +33,20 @@ import {
   type Prediction,
 } from "./hyrox";
 import { categorize, weeklyPlan, type SessionSummary } from "./plan";
-import { addEntryVolumes, benchmarksFromEntries, emptyVolumes, entryTags, ergSessionsFromEntries, summarize, type Volumes } from "./workout";
+import {
+  addEntryVolumes,
+  benchmarksFromEntries,
+  bestTemplate,
+  emptyVolumes,
+  entryTags,
+  ergSessionsFromEntries,
+  summarize,
+  type SessionKey,
+  type Template,
+  type Volumes,
+} from "./workout";
 import { isRun } from "./strava";
+import { applyGarminLoadsIfNeeded } from "./sync";
 
 const TZ = process.env.APP_TIMEZONE || "UTC";
 const dayFmt = new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" });
@@ -43,6 +55,35 @@ const dayFmt = new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric",
 export function localDate(d: Date | string): string {
   return dayFmt.format(typeof d === "string" ? new Date(d) : d);
 }
+const hourFmt = new Intl.DateTimeFormat("en-GB", { timeZone: TZ, hour: "2-digit", hour12: false });
+
+/** What identifies a recurring session (for "same as last week?"). */
+function sessionKey(a: Pick<ActivityRow, "id" | "name" | "sport" | "start_time">): SessionKey {
+  const date = localDate(a.start_time);
+  return {
+    id: a.id,
+    name: a.name,
+    sport: a.sport,
+    date,
+    weekday: new Date(date + "T00:00:00Z").getUTCDay(),
+    hour: Number(hourFmt.format(new Date(a.start_time))) % 24,
+  };
+}
+
+/** Earlier sessions with details filled in, newest first (templates to copy from). */
+export async function getTemplates(): Promise<Template[]> {
+  const { data } = await db()
+    .from("activities")
+    .select("id, name, sport, start_time, entries, focus")
+    .not("entries", "is", null)
+    .gte("start_time", new Date(Date.now() - 180 * 86400000).toISOString())
+    .order("start_time", { ascending: false })
+    .limit(200);
+  return ((data ?? []) as Pick<ActivityRow, "id" | "name" | "sport" | "start_time" | "entries" | "focus">[])
+    .filter((a) => a.entries?.length)
+    .map((a) => ({ ...sessionKey(a), entries: a.entries!, focus: a.focus }));
+}
+
 export function today(): string {
   return localDate(new Date());
 }
@@ -84,8 +125,8 @@ export async function getBenchmarks(sinceDays: number): Promise<BenchmarkRow[]> 
 export const ERG_SPORTS = ["SkiErg", "RowErg", "BikeErg"] as const;
 const ROW_SPORTS = ["RowErg", "VirtualRow", "Rowing"];
 
-export function sportGroup(a: Pick<ActivityRow, "sport" | "name" | "focus" | "entries">): "Run" | "Erg" | "HYROX & strength" | "Other" {
-  const c = categorize(a.sport, a.name, a.focus, a.entries);
+export function sportGroup(a: Pick<ActivityRow, "sport" | "name" | "focus" | "entries" | "garmin_type">): "Run" | "Erg" | "HYROX & strength" | "Other" {
+  const c = categorize(a.sport, a.name, a.focus, a.entries, a.garmin_type);
   if (c === "run") return "Run";
   if (c === "erg") return "Erg";
   if (c === "hyrox" || c === "strength") return "HYROX & strength";
@@ -96,7 +137,15 @@ const HARD_FOCUS = ["threshold", "intervals", "race"];
 
 export function isHardSession(a: ActivityRow): boolean {
   const z = a.zone_seconds;
-  return (z ? z[3] + z[4] >= 600 : false) || (a.load ?? 0) >= 100 || (a.rpe ?? 0) >= 8 || HARD_FOCUS.includes(a.focus ?? "");
+  return (
+    (z ? z[3] + z[4] >= 600 : false) ||
+    (a.load ?? 0) >= 100 ||
+    (a.rpe ?? 0) >= 8 ||
+    HARD_FOCUS.includes(a.focus ?? "") ||
+    // Garmin Training Effect: 4+ aerobic is "highly improving", 2.5+ anaerobic is real top-end work.
+    (a.garmin_te_aerobic ?? 0) >= 4 ||
+    (a.garmin_te_anaerobic ?? 0) >= 2.5
+  );
 }
 
 /** Structured hard work: your session type, HR time at threshold+, or a workout-style run name. */
@@ -152,7 +201,8 @@ function estimate(athlete: AthleteRow, efforts: Record<string, number>, refDate:
   }
   // Garmin's lactate threshold (from the watch's guided test or auto-detection), if recent.
   const ltAge = athlete.garmin_lt_date ? Date.parse(refDate) - Date.parse(athlete.garmin_lt_date) : NaN;
-  if (athlete.garmin_lt_speed && ltAge >= 0 && ltAge < 120 * 86400000) {
+  // Garmin keeps showing your last measured threshold until it re-measures, so accept up to a year.
+  if (athlete.garmin_lt_speed && (isNaN(ltAge) || (ltAge >= -86400000 && ltAge < 365 * 86400000))) {
     const speed = athlete.garmin_lt_speed;
     return { vdot: round(vdotFromThresholdSpeed(speed), 1), thresholdSpeed: speed, source: `Garmin lactate threshold (${athlete.garmin_lt_date})`, candidates, cs };
   }
@@ -188,6 +238,7 @@ interface Everything {
 }
 
 async function loadEverything(): Promise<Everything> {
+  await applyGarminLoadsIfNeeded();
   const [athlete, activities, benchmarks, checkins] = await Promise.all([getAthlete(), getActivities(450), getBenchmarks(450), getCheckins(60)]);
   return { athlete, activities, benchmarks, checkins };
 }
@@ -222,10 +273,13 @@ function hyroxSessions(e: Everything, runs: ActivityRow[]): HyroxSession[] {
 
 function predictAt(e: Everything, runs: ActivityRow[], sims: HyroxSession[], date: string, useOverride: boolean): Prediction {
   const vdot = vdotAsOf(runs, e.athlete, date, useOverride);
+  // Today's prediction uses Garmin's own 10K prediction when synced; trends use your runs only.
+  const garmin10k = useOverride && !e.athlete.threshold_pace_override ? e.athlete.garmin_pred_10k : null;
   return predictHyrox({
     division: e.athlete.hyrox_division as Division,
     asOf: date,
-    tenKPace: vdot ? predictTime(vdot, 10000) / 10 : null,
+    tenKPace: garmin10k ? garmin10k / 10 : vdot ? predictTime(vdot, 10000) / 10 : null,
+    tenKSource: garmin10k ? "Garmin 10K prediction" : "10K pace from your runs",
     skiSessions: ergSessions(e.activities, ["SkiErg"], "ski"),
     rowSessions: ergSessions(e.activities, ROW_SPORTS, "row"),
     benchmarks: allBenchmarks(e),
@@ -298,7 +352,7 @@ export async function dashboardData() {
     .filter((a) => localDate(a.start_time) >= daysAgo(34))
     .map((a) => ({
       date: localDate(a.start_time),
-      category: categorize(a.sport, a.name, a.focus, a.entries),
+      category: categorize(a.sport, a.name, a.focus, a.entries, a.garmin_type),
       load: a.load ?? 0,
       durationS: a.moving_s ?? a.duration_s,
       hard: isHardSession(a),
@@ -607,14 +661,24 @@ export interface CalendarSession {
   hasDetails: boolean;
   excluded: boolean;
   hard: boolean;
+  /** An earlier session that looks like the same class, offered as "Same as …?". */
+  suggestion: { id: string; date: string; summary: string } | null;
+  needsDetails: boolean;
 }
 
-function toCalendarSession(a: ActivityRow): CalendarSession {
+const NO_DETAILS_NEEDED = ["SkiErg", "RowErg", "BikeErg", "HYROX"];
+
+export function needsDetails(a: Pick<ActivityRow, "entries" | "sport" | "excluded" | "garmin_type">): boolean {
+  return !a.entries?.length && !a.excluded && !isRun(a.sport) && !NO_DETAILS_NEEDED.includes(a.sport) && categorize(a.sport, null, null, null, a.garmin_type) !== "run";
+}
+
+function toCalendarSession(a: ActivityRow, templates: Template[]): CalendarSession {
+  const tpl = needsDetails(a) ? bestTemplate(sessionKey(a), templates) : null;
   return {
     id: a.id,
     name: a.name ?? a.sport,
     sport: a.sport,
-    category: categorize(a.sport, a.name, a.focus, a.entries),
+    category: categorize(a.sport, a.name, a.focus, a.entries, a.garmin_type),
     focus: a.focus,
     durationS: a.moving_s ?? a.duration_s,
     load: Math.round(a.load ?? 0),
@@ -625,6 +689,8 @@ function toCalendarSession(a: ActivityRow): CalendarSession {
     hasDetails: !!a.entries?.length,
     excluded: a.excluded,
     hard: isHardSession(a),
+    suggestion: tpl ? { id: tpl.id, date: tpl.date, summary: summarize(tpl.entries, 2) } : null,
+    needsDetails: needsDetails(a),
   };
 }
 
@@ -656,6 +722,7 @@ function weekVolumes(activities: ActivityRow[]): Volumes {
 
 /** One week (Monday start) plus a month overview around it. */
 export async function calendarData(weekParam?: string) {
+  await applyGarminLoadsIfNeeded();
   const ref = weekParam && /^\d{4}-\d{2}-\d{2}$/.test(weekParam) ? weekParam : today();
   const monday = weekStart(ref);
   const sunday = shift(monday, 6);
@@ -671,7 +738,7 @@ export async function calendarData(weekParam?: string) {
 
   const from = gridStart < monday ? gridStart : monday;
   const to = gridEnd > sunday ? gridEnd : sunday;
-  const [{ data, error }, checkins] = await Promise.all([
+  const [{ data, error }, checkins, templates] = await Promise.all([
     db()
       .from("activities")
       .select("*")
@@ -679,6 +746,7 @@ export async function calendarData(weekParam?: string) {
       .lte("start_time", new Date(Date.parse(to + "T00:00:00Z") + 2 * 86400000).toISOString())
       .order("start_time"),
     db().from("checkins").select("*").gte("date", monday).lte("date", sunday),
+    getTemplates(),
   ]);
   if (error) throw error;
   const acts = (data as ActivityRow[]).map((a) => ({ a, date: localDate(a.start_time) })).filter((x) => x.date >= from && x.date <= to);
@@ -688,7 +756,7 @@ export async function calendarData(weekParam?: string) {
     const c = ((checkins.data ?? []) as CheckinRow[]).find((x) => x.date === date) ?? null;
     return {
       date,
-      sessions: acts.filter((x) => x.date === date).map((x) => toCalendarSession(x.a)),
+      sessions: acts.filter((x) => x.date === date).map((x) => toCalendarSession(x.a, templates)),
       checkin: c ? { hrv: c.hrv_ms, sleep: c.sleep_score, bodyBattery: c.body_battery } : null,
     };
   });
@@ -697,7 +765,7 @@ export async function calendarData(weekParam?: string) {
   const counted = weekActs.filter((a) => !a.excluded);
   const byCategory: Record<string, number> = {};
   for (const a of counted) {
-    const c = categorize(a.sport, a.name, a.focus, a.entries);
+    const c = categorize(a.sport, a.name, a.focus, a.entries, a.garmin_type);
     byCategory[c] = (byCategory[c] ?? 0) + (a.moving_s ?? a.duration_s);
   }
 
@@ -710,7 +778,7 @@ export async function calendarData(weekParam?: string) {
         return {
           date,
           inMonth: date >= monthStart && date <= monthEnd,
-          categories: list.map((x) => categorize(x.a.sport, x.a.name, x.a.focus, x.a.entries)),
+          categories: list.map((x) => categorize(x.a.sport, x.a.name, x.a.focus, x.a.entries, x.a.garmin_type)),
           load: Math.round(list.reduce((s, x) => s + (x.a.load ?? 0), 0)),
         };
       }),
@@ -733,7 +801,7 @@ export async function calendarData(weekParam?: string) {
       sessions: counted.length,
       hours: counted.reduce((s, a) => s + (a.moving_s ?? a.duration_s), 0) / 3600,
       hard: counted.filter(isHardSession).length,
-      needsDetails: counted.filter((a) => !a.entries?.length && !isRun(a.sport) && !ERG_SPORTS.includes(a.sport as (typeof ERG_SPORTS)[number]) && a.sport !== "HYROX").length,
+      needsDetails: counted.filter(needsDetails).length,
       byCategory,
       volumes: weekVolumes(weekActs),
     },
@@ -743,4 +811,18 @@ export async function calendarData(weekParam?: string) {
 export async function getActivity(id: string): Promise<ActivityRow | null> {
   const { data } = await db().from("activities").select("*").eq("id", id).maybeSingle();
   return (data as ActivityRow) ?? null;
+}
+
+/** Templates for the session editor, with the best "same as last week" match first. */
+export async function templatesFor(a: ActivityRow | null): Promise<{ suggestedId: string | null; templates: (Template & { label: string })[] }> {
+  const templates = await getTemplates();
+  const suggested = a ? bestTemplate(sessionKey(a), templates) : null;
+  const list = templates
+    .filter((t) => !a || t.id !== a.id)
+    .slice(0, 40)
+    .map((t) => ({
+      ...t,
+      label: `${new Date(t.date + "T00:00:00Z").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" })} · ${t.name ?? t.sport} · ${summarize(t.entries, 2)}`,
+    }));
+  return { suggestedId: suggested?.id ?? null, templates: list };
 }

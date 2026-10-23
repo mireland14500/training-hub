@@ -4,7 +4,7 @@ import { deleteSession } from "@/app/actions";
 import { FOCUS_LABEL } from "@/components/categories";
 import SessionEditor from "@/components/SessionEditor";
 import { formatDuration, formatPace } from "@/lib/analysis";
-import { getActivity, localDate } from "@/lib/data";
+import { getActivity, localDate, templatesFor } from "@/lib/data";
 import { isRun } from "@/lib/strava";
 
 export const dynamic = "force-dynamic";
@@ -20,6 +20,7 @@ export default async function Session({ params }: { params: Promise<{ id: string
   const { id } = await params;
   const a = await getActivity(id);
   if (!a) notFound();
+  const { templates, suggestedId } = await templatesFor(a);
   const date = localDate(a.start_time);
   const time = new Date(a.start_time).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: process.env.APP_TIMEZONE || "UTC" });
   const facts = [
@@ -46,6 +47,8 @@ export default async function Session({ params }: { params: Promise<{ id: string
 
       <SessionEditor
         session={{ id: a.id, name: a.name, focus: a.focus, rpe: a.rpe, notes: a.notes, entries: a.entries, photoPath: a.photo_path }}
+        templates={templates}
+        suggestedId={suggestedId}
       />
 
       {a.source !== "strava" && (

@@ -70,6 +70,7 @@ export const REFERENCE: Record<Division, { average: Reference; fast: Reference }
 export const FRESH_TO_RACE = { erg: 1.06, station: 1.1 };
 /** Default slowdown of HYROX 1 km runs vs open 10K race pace, until a sim/race measures yours. */
 export const DEFAULT_RUN_PENALTY = 0.12;
+export const MIN_RUN_PENALTY = 0.05;
 
 // ---------------------------------------------------------------------------
 // Inputs
@@ -152,6 +153,8 @@ export interface Segment {
   time: number;
   source: Source;
   detail: string;
+  /** From a race/sim older than the current window — still yours, but less certain. */
+  stale?: boolean;
   reference: { average: number; fast: number };
 }
 
@@ -171,12 +174,16 @@ export interface PredictionInput {
   asOf: string;
   /** Open 10K race pace (s/km) from running fitness, or null if unknown. */
   tenKPace: number | null;
+  /** Where tenKPace came from, for display (e.g. "Garmin 10K prediction"). */
+  tenKSource?: string;
   skiSessions: ErgSession[];
   rowSessions: ErgSession[];
   benchmarks: Benchmark[];
   hyroxSessions: HyroxSession[];
-  /** How far back data counts (days). */
+  /** How far back data counts as current (days). */
   windowDays?: number;
+  /** Older races/sims (up to this many days) still beat typical times for segments with no recent data. */
+  fallbackDays?: number;
 }
 
 const UNCERTAINTY: Record<Source, number> = {
@@ -191,22 +198,37 @@ function daysBetween(a: string, b: string) {
   return (Date.parse(b) - Date.parse(a)) / 86400000;
 }
 
+const KIND_LABEL: Record<HyroxSplits["kind"], string> = { race: "race", full_sim: "full sim", half_sim: "half sim", custom: "workout" };
+
+function monthsAgo(date: string, asOf: string): string {
+  const m = Math.round(daysBetween(date, asOf) / 30.4);
+  return m <= 1 ? "1 month ago" : `${m} months ago`;
+}
+
 export function predictHyrox(input: PredictionInput): Prediction {
   const { division, asOf } = input;
   const window = input.windowDays ?? 120;
+  const fallback = input.fallbackDays ?? 548;
   const inWindow = (d: string) => d <= asOf && daysBetween(d, asOf) <= window;
   const ref = REFERENCE[division];
-  const sims = input.hyroxSessions.filter((s) => inWindow(s.date)).sort((a, b) => (a.date < b.date ? 1 : -1));
+  const byNewest = (a: HyroxSession, b: HyroxSession) => (a.date < b.date ? 1 : -1);
+  const sims = input.hyroxSessions.filter((s) => inWindow(s.date)).sort(byNewest);
+  // Races/sims older than the window: used only where nothing recent exists (e.g. a race 6 months ago).
+  const older = input.hyroxSessions.filter((s) => s.date <= asOf && !inWindow(s.date) && daysBetween(s.date, asOf) <= fallback).sort(byNewest);
+  const hasRuns = (s: HyroxSession) => s.splits.runs.filter((r) => r && r > 0).length >= 4;
+  const label = (s: HyroxSession, stale: boolean) => `${KIND_LABEL[s.splits.kind]} ${s.date}${stale ? ` (${monthsAgo(s.date, asOf)})` : ""}`;
 
   // --- Runs: 10K pace + compromised-running penalty (measured from your latest sim/race with run splits).
   let runPenalty = DEFAULT_RUN_PENALTY;
   let runPenaltySource = "default estimate";
-  const measured = sims.find((s) => s.tenKPaceAtTime && s.splits.runs.filter((r) => r && r > 0).length >= 4);
+  const measured = sims.find((s) => s.tenKPaceAtTime && hasRuns(s)) ?? older.find((s) => s.tenKPaceAtTime && hasRuns(s));
   if (measured) {
     const rs = measured.splits.runs.filter((r): r is number => !!r && r > 0);
     const avg = rs.reduce((a, b) => a + b, 0) / rs.length;
-    runPenalty = Math.min(0.5, Math.max(0, avg / measured.tenKPaceAtTime! - 1));
-    runPenaltySource = `measured in your ${measured.splits.kind.replace("_", " ")} on ${measured.date}`;
+    // Floor of 5%: even elites run HYROX kms ≥5% slower than open 10K pace; a lower figure means the
+    // fitness estimate for that date was too slow, not that the stations cost nothing.
+    runPenalty = Math.min(0.5, Math.max(MIN_RUN_PENALTY, avg / measured.tenKPaceAtTime! - 1));
+    runPenaltySource = `measured in your ${label(measured, !inWindow(measured.date))}`;
   }
 
   const segments: Segment[] = [];
@@ -217,11 +239,11 @@ export function predictHyrox(input: PredictionInput): Prediction {
       name: "Running 8 × 1 km",
       time: perKm * 8,
       source: "running fitness",
-      detail: `${fmt(perKm)}/km (10K pace ${fmt(input.tenKPace)} + ${Math.round(runPenalty * 100)}%)`,
+      detail: `${fmt(perKm)}/km (${input.tenKSource ?? "10K pace"} ${fmt(input.tenKPace)}/km + ${Math.round(runPenalty * 100)}%)`,
       reference: { average: ref.average.run * 8, fast: ref.fast.run * 8 },
     });
   } else {
-    const simRuns = sims.find((s) => s.splits.runs.filter((r) => r && r > 0).length >= 4);
+    const simRuns = sims.find(hasRuns) ?? older.find(hasRuns);
     const rs = simRuns?.splits.runs.filter((r): r is number => !!r && r > 0) ?? [];
     const perKm = rs.length ? rs.reduce((a, b) => a + b, 0) / rs.length : ref.average.run;
     segments.push({
@@ -229,17 +251,19 @@ export function predictHyrox(input: PredictionInput): Prediction {
       name: "Running 8 × 1 km",
       time: perKm * 8,
       source: rs.length ? "race/sim" : "reference",
-      detail: `${fmt(perKm)}/km`,
+      detail: simRuns ? `${fmt(perKm)}/km in your ${label(simRuns, !inWindow(simRuns.date))}` : `${fmt(perKm)}/km`,
+      stale: !!simRuns && !inWindow(simRuns.date),
       reference: { average: ref.average.run * 8, fast: ref.fast.run * 8 },
     });
   }
 
-  // --- Stations: most recent evidence wins (sim/race split, then benchmark or erg log), else reference.
+  // --- Stations: most recent evidence wins (sim/race split, then benchmark or erg log),
+  // then an older race/sim, else the typical time for the division.
   for (const st of STATIONS) {
     const candidates: { date: string; time: number; source: Source; detail: string }[] = [];
     for (const s of sims) {
       const t = s.splits.stations[st.key];
-      if (t && t > 0) candidates.push({ date: s.date, time: t, source: "race/sim", detail: `${s.splits.kind.replace("_", " ")} ${s.date}` });
+      if (t && t > 0) candidates.push({ date: s.date, time: t, source: "race/sim", detail: label(s, false) });
     }
     const bms = input.benchmarks.filter((b) => b.station === st.key && inWindow(b.date));
     if (bms.length) {
@@ -252,29 +276,33 @@ export function predictHyrox(input: PredictionInput): Prediction {
       if (best) candidates.push({ date: best.date, time: best.time * FRESH_TO_RACE.erg, source: "erg log", detail: `best 1 km-equivalent ${fmt(best.time)} (${best.date}) + 6% race fatigue` });
     }
     const latest = candidates.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : a.time - b.time))[0];
+    const old = latest ? undefined : older.find((s) => (s.splits.stations[st.key] ?? 0) > 0);
     segments.push({
       key: st.key,
       name: st.name,
-      time: latest?.time ?? ref.average.stations[st.key],
-      source: latest?.source ?? "reference",
-      detail: latest?.detail ?? `typical ${DIVISIONS[division]} time — log a benchmark to personalise`,
+      time: latest?.time ?? old?.splits.stations[st.key] ?? ref.average.stations[st.key],
+      source: latest?.source ?? (old ? "race/sim" : "reference"),
+      detail: latest?.detail ?? (old ? label(old, true) : `typical ${DIVISIONS[division]} time — log a benchmark to personalise`),
+      stale: !!old,
       reference: { average: ref.average.stations[st.key], fast: ref.fast.stations[st.key] },
     });
   }
 
   // --- Roxzone.
-  const rox = sims.find((s) => s.splits.kind !== "half_sim" && s.splits.roxzone_s && s.splits.roxzone_s > 0);
+  const hasRox = (s: HyroxSession) => s.splits.kind !== "half_sim" && !!s.splits.roxzone_s && s.splits.roxzone_s > 0;
+  const rox = sims.find(hasRox) ?? older.find(hasRox);
   segments.push({
     key: "roxzone",
     name: "Roxzone (transitions)",
     time: rox?.splits.roxzone_s ?? ref.average.roxzone,
     source: rox ? "race/sim" : "reference",
-    detail: rox ? `from ${rox.splits.kind.replace("_", " ")} ${rox.date}` : "typical transition time",
+    detail: rox ? `from your ${label(rox, !inWindow(rox.date))}` : "typical transition time",
+    stale: !!rox && !inWindow(rox.date),
     reference: { average: ref.average.roxzone, fast: ref.fast.roxzone },
   });
 
   const total = segments.reduce((a, s) => a + s.time, 0);
-  const sd = Math.sqrt(segments.reduce((a, s) => a + (s.time * UNCERTAINTY[s.source]) ** 2, 0));
+  const sd = Math.sqrt(segments.reduce((a, s) => a + (s.time * (s.stale ? 0.1 : UNCERTAINTY[s.source])) ** 2, 0));
   const own = segments.filter((s) => s.source !== "reference").reduce((a, s) => a + s.time, 0);
   return { total, low: total - sd, high: total + sd, segments, runPenalty, runPenaltySource, confidence: own / total };
 }

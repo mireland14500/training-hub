@@ -208,9 +208,12 @@ export async function deleteBenchmark(id: string) {
 
 export async function setRpe(id: string, rpe: number) {
   const athlete = await getAthlete();
-  const { data } = await db().from("activities").select("duration_s, moving_s, avg_hr, suffer_score").eq("id", id).single();
+  const { data } = await db().from("activities").select("duration_s, moving_s, avg_hr, suffer_score, garmin_load").eq("id", id).single();
   if (!data) return;
-  const { load, method } = sessionLoad({ duration_s: data.moving_s || data.duration_s, avg_hr: data.avg_hr, rpe, suffer_score: data.suffer_score }, athlete);
+  const { load, method } = sessionLoad(
+    { duration_s: data.moving_s || data.duration_s, avg_hr: data.avg_hr, rpe, suffer_score: data.suffer_score, garmin_load: data.garmin_load, garmin_scale: athlete.garmin_load_scale },
+    athlete,
+  );
   await db().from("activities").update({ rpe, load, load_method: method }).eq("id", id);
   revalidatePath("/", "layout");
 }
@@ -267,11 +270,18 @@ export async function saveSession(form: FormData) {
 
   let startTime: string;
   if (id) {
-    const { data: a } = await db().from("activities").select("start_time, duration_s, moving_s, avg_hr, suffer_score, name").eq("id", id).single();
+    const { data: a } = await db().from("activities").select("start_time, duration_s, moving_s, avg_hr, suffer_score, garmin_load, name").eq("id", id).single();
     if (!a) throw new Error("Session not found");
     fields.name ??= a.name;
     const { load, method } = sessionLoad(
-      { duration_s: a.moving_s || a.duration_s, avg_hr: a.avg_hr, rpe: fields.rpe as number | null, suffer_score: a.suffer_score },
+      {
+        duration_s: a.moving_s || a.duration_s,
+        avg_hr: a.avg_hr,
+        rpe: fields.rpe as number | null,
+        suffer_score: a.suffer_score,
+        garmin_load: a.garmin_load,
+        garmin_scale: athlete.garmin_load_scale,
+      },
       athlete,
     );
     const { error } = await db().from("activities").update({ ...fields, load, load_method: method }).eq("id", id);
@@ -309,4 +319,23 @@ export async function deleteSession(form: FormData) {
   const { data } = await db().from("activities").select("start_time").eq("id", id).single();
   await deleteActivity(id);
   redirect(`/calendar${data ? `?week=${localDate(data.start_time)}` : ""}`);
+}
+
+/** "Same as last week": copies what was done (and the session type) from an earlier session. */
+export async function copySessionDetails(form: FormData) {
+  const targetId = str(form, "target");
+  const sourceId = str(form, "source");
+  if (!targetId || !sourceId) return;
+  const [{ data: target }, { data: source }] = await Promise.all([
+    db().from("activities").select("start_time, focus").eq("id", targetId).single(),
+    db().from("activities").select("entries, focus").eq("id", sourceId).single(),
+  ]);
+  if (!target || !source?.entries) return;
+  const { error } = await db()
+    .from("activities")
+    .update({ entries: source.entries, focus: target.focus ?? source.focus })
+    .eq("id", targetId);
+  if (error) throw error;
+  revalidatePath("/", "layout");
+  redirect(`/calendar?week=${localDate(target.start_time)}`);
 }

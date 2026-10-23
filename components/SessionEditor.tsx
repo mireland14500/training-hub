@@ -17,6 +17,9 @@ interface Props {
   } | null;
   /** For a new session: the day it was clicked on (YYYY-MM-DD). */
   defaultDate?: string;
+  /** Earlier sessions with details, to copy from; suggestedId is the likely "same class". */
+  templates?: { id: string; label: string; entries: Entry[]; focus: string | null; name: string | null }[];
+  suggestedId?: string | null;
 }
 
 interface Reading {
@@ -124,7 +127,7 @@ function EntryCard({ row, onChange, onRemove, index }: { row: Row; onChange: (r:
   );
 }
 
-export default function SessionEditor({ session, defaultDate }: Props) {
+export default function SessionEditor({ session, defaultDate, templates = [], suggestedId = null }: Props) {
   const [name, setName] = useState(session?.name ?? "");
   const [focus, setFocus] = useState<string | null>(session?.focus ?? null);
   const [rpe, setRpe] = useState<number | null>(session?.rpe ?? null);
@@ -161,6 +164,17 @@ export default function SessionEditor({ session, defaultDate }: Props) {
 
   const update = (i: number) => (r: Row) => setRows(rows.map((x, j) => (j === i ? r : x)));
   const remove = (i: number) => () => setRows(rows.filter((_, j) => j !== i));
+  function copyFrom(id: string) {
+    const t = templates.find((x) => x.id === id);
+    if (!t) return;
+    if (rows.length && !confirm("Replace the exercises you've entered with this session's?")) return;
+    setRows(t.entries.map(toRow));
+    if (!focus && t.focus) setFocus(t.focus);
+    if (!name && t.name) setName(t.name);
+    setMsg("Copied — adjust paces and weights to what you did today.");
+  }
+  const suggested = !session?.entries?.length ? templates.find((t) => t.id === suggestedId) : undefined;
+
   const add = () => setRows([...rows, { key: nextKey++, exercise: "ski", values: { sets: "", distance_m: "", reps: "", time_s: "", speed_kmh: "", incline_pct: "", weight_kg: "", name: "", notes: "" } }]);
 
   return (
@@ -225,6 +239,20 @@ export default function SessionEditor({ session, defaultDate }: Props) {
             <input type="file" accept="image/*" className="sr-only" onChange={onPhoto} disabled={busy} />
           </label>
         </div>
+        {suggested && rows.length === 0 && (
+          <button type="button" onClick={() => copyFrom(suggested.id)} className="w-full rounded-xl border border-dashed border-accent p-2.5 text-left text-sm">
+            <span className="font-semibold text-accent">Same as last time?</span>
+            <span className="block text-xs text-muted">{suggested.label}</span>
+          </button>
+        )}
+        {templates.length > 0 && (
+          <select className="input py-2 text-sm" value="" onChange={(e) => copyFrom(e.target.value)} aria-label="Copy from a previous session">
+            <option value="">Copy from a previous session…</option>
+            {templates.map((t) => (
+              <option key={t.id} value={t.id}>{t.label}</option>
+            ))}
+          </select>
+        )}
         {preview && (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={preview} alt="Workout photo" className="max-h-56 w-full rounded-xl object-contain" />

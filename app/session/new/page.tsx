@@ -1,6 +1,6 @@
 import Link from "next/link";
 import SessionEditor from "@/components/SessionEditor";
-import { today } from "@/lib/data";
+import { templatesFor, today } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +14,7 @@ export default async function NewSession({ searchParams }: { searchParams: Promi
         <h1 className="text-2xl font-bold">Add a session</h1>
         <p className="text-sm text-muted">For a class or workout that isn&apos;t on Strava. If it is on Strava (e.g. as &quot;HIIT&quot;), open it from the calendar instead so it isn&apos;t counted twice.</p>
       </div>
-      <SessionEditor session={null} defaultDate={day} />
+      <SessionEditor session={null} defaultDate={day} templates={(await templatesFor(null)).templates} />
     </div>
   );
 }

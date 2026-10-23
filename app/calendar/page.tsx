@@ -1,43 +1,54 @@
 import Link from "next/link";
+import { copySessionDetails } from "@/app/actions";
 import { CATEGORY_COLOR, CATEGORY_LABEL, FOCUS_LABEL } from "@/components/categories";
 import { formatDuration } from "@/lib/analysis";
 import { calendarData, type CalendarSession } from "@/lib/data";
-import { isRun } from "@/lib/strava";
 
 export const dynamic = "force-dynamic";
 
 const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const NO_DETAILS_NEEDED = ["SkiErg", "RowErg", "BikeErg", "HYROX"];
 
 function dayLabel(date: string) {
   return new Date(date + "T00:00:00Z").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
 }
 
 function SessionCard({ s }: { s: CalendarSession }) {
-  const needsDetails = !s.hasDetails && !isRun(s.sport) && !NO_DETAILS_NEEDED.includes(s.sport) && !s.excluded;
+  const needsDetails = s.needsDetails;
   return (
-    <Link
-      href={`/session/${s.id}`}
-      className={`block rounded-xl border border-border bg-card p-2.5 text-sm transition hover:border-accent ${s.excluded ? "opacity-50" : ""}`}
-      style={{ borderLeft: `4px solid ${CATEGORY_COLOR[s.category]}` }}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 font-semibold leading-tight">{s.name}</div>
-        <div className="tabular shrink-0 text-xs font-semibold">{s.load}</div>
-      </div>
-      <div className="tabular mt-0.5 text-xs text-muted">
-        {formatDuration(s.durationS)}
-        {s.distanceM ? ` · ${(s.distanceM / 1000).toFixed(1)} km` : ""}
-        {s.avgHr ? ` · ${Math.round(s.avgHr)} bpm` : ""}
-      </div>
-      <div className="mt-1 flex flex-wrap gap-1">
-        {s.focus && <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[11px] font-semibold text-accent">{FOCUS_LABEL[s.focus]}</span>}
-        {s.hard && !s.focus && <span className="rounded-full bg-bad/15 px-2 py-0.5 text-[11px] font-semibold text-bad">Hard</span>}
-        {s.hasPhoto && <span className="text-[11px]">📷</span>}
-      </div>
-      {s.summary && <div className="mt-1 line-clamp-2 text-xs text-muted">{s.summary}</div>}
-      {needsDetails && <div className="mt-1 text-xs font-semibold text-accent">+ Add what you did</div>}
-    </Link>
+    <div>
+      <Link
+        href={`/session/${s.id}`}
+        className={`block rounded-xl border border-border bg-card p-2.5 text-sm transition hover:border-accent ${s.excluded ? "opacity-50" : ""}`}
+        style={{ borderLeft: `4px solid ${CATEGORY_COLOR[s.category]}` }}
+      >
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 font-semibold leading-tight">{s.name}</div>
+          <div className="tabular shrink-0 text-xs font-semibold">{s.load}</div>
+        </div>
+        <div className="tabular mt-0.5 text-xs text-muted">
+          {formatDuration(s.durationS)}
+          {s.distanceM ? ` · ${(s.distanceM / 1000).toFixed(1)} km` : ""}
+          {s.avgHr ? ` · ${Math.round(s.avgHr)} bpm` : ""}
+        </div>
+        <div className="mt-1 flex flex-wrap gap-1">
+          {s.focus && <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[11px] font-semibold text-accent">{FOCUS_LABEL[s.focus]}</span>}
+          {s.hard && !s.focus && <span className="rounded-full bg-bad/15 px-2 py-0.5 text-[11px] font-semibold text-bad">Hard</span>}
+          {s.hasPhoto && <span className="text-[11px]">📷</span>}
+        </div>
+        {s.summary && <div className="mt-1 line-clamp-2 text-xs text-muted">{s.summary}</div>}
+        {needsDetails && !s.suggestion && <div className="mt-1 text-xs font-semibold text-accent">+ Add what you did</div>}
+      </Link>
+      {s.suggestion && (
+        <form action={copySessionDetails} className="mt-1">
+          <input type="hidden" name="target" value={s.id} />
+          <input type="hidden" name="source" value={s.suggestion.id} />
+          <button className="w-full rounded-xl border border-dashed border-accent px-2.5 py-1.5 text-left text-xs">
+            <span className="font-semibold text-accent">Same as {dayLabel(s.suggestion.date)}?</span>
+            <span className="block truncate text-muted">{s.suggestion.summary}</span>
+          </button>
+        </form>
+      )}
+    </div>
   );
 }
 

@@ -26,6 +26,8 @@ Tap any session to tell the app what it really was. This is useful for gym class
 
 **+ Add** on any day logs a class that isn't on Strava.
 
+**Same as last week?** Most classes repeat. Once you've filled in a class, the calendar spots the next one (same name, or same weekday, time and type) and offers to copy its details in one tap. The session editor also has **Copy from a previous session…** for any earlier session with details.
+
 How session details feed the analysis:
 - **Weekly plan and session mix:** a "HIIT" class with treadmill reps counts as a run, with Threshold or Intervals making it a quality session. Ski/row rows count as erg work, and station rows as station work.
 - **HYROX prediction:** a single ski/row piece (e.g. 1 × 1000 m) counts like an erg log. A station effort of at least half the race distance or reps (e.g. 50 wall balls in one go) counts as a benchmark. If the session also had running, it's treated as done "after running".
@@ -89,7 +91,14 @@ npm run dev
 
 `npm run garmin` imports the following from Garmin Connect:
 - Overnight HRV, sleep score and hours, resting HR, Body Battery at wake, and Garmin Training Readiness. These go into each day's check-in. Your soreness and energy entries are kept.
-- Garmin's running **lactate threshold** (pace and HR) and **VO2max**. A Garmin threshold from the last 120 days becomes the main source for your threshold pace, training paces, race predictions and HYROX run splits. A manual override in Settings still takes priority.
+- Garmin's running **lactate threshold** (pace and HR), **VO2max** and **race predictor**.
+  - A Garmin threshold from the last 12 months becomes the main source for your threshold pace, training paces and race predictions. A manual override in Settings still takes priority.
+  - Garmin's **10K prediction** sets the pace of your HYROX run splits.
+- **Per-activity training load and Training Effect**, matched to your Strava activities by start time.
+  - Garmin's load becomes the main source of training load. It's EPOC-based, so it captures interval classes much better than average HR does.
+  - It's converted to the app's scale (~100 = 1 h at threshold) using your own activities that have both, so your fitness/fatigue history stays continuous.
+  - Training Effect of 4+ aerobic or 2.5+ anaerobic marks a session as hard.
+  - Garmin's activity type marks treadmill runs.
 
 ```bash
 npm run garmin                 # last 7 days (30 on the first run)
@@ -113,10 +122,11 @@ Race = 8 × 1 km run + 8 stations + Roxzone. Each segment uses your most recent 
 
 | Segment | Source (best first) |
 |---|---|
-| Runs | Your open 10K pace (from running fitness) × a "compromised running" slowdown. The slowdown is measured from your latest sim or race with run splits; the default is +12%. |
+| Runs | Your open 10K pace (Garmin's 10K prediction if synced, otherwise from your runs) × a "compromised running" slowdown. The slowdown is measured from your latest sim or race with run splits, with a floor of 5%; the default is +12%. |
 | SkiErg / Row | Latest sim/race split, or your best 1 km equivalent from erg logs (Paul's law: +5 s/500 m per doubling of distance) + 6% race fatigue. |
 | Other stations | Latest sim/race split, or your best benchmark scaled to race distance/reps and race weight, + 10% if it was done fresh. |
 | Roxzone | From your latest full sim or race. |
+| Older races | A race or sim older than 4 months (up to 18 months) is still used for any segment with no recent data. It's marked "N months ago" and gets a wider range. |
 | No data | Typical time for your division, shown in amber so you know which segments to benchmark. |
 
 The likely range widens for segments that rely on typical times. The reference "typical" and "top ~15%" splits are rough guides from public results; your own data always replaces them.

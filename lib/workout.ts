@@ -231,3 +231,42 @@ function fmt(s: number): string {
   const sec = Math.round(s % 60);
   return `${m}:${String(sec).padStart(2, "0")}`;
 }
+
+// ---------------------------------------------------------------------------
+// "Same as last week?" — reusing a previous session's details
+// ---------------------------------------------------------------------------
+
+export interface SessionKey {
+  id: string;
+  name: string | null;
+  sport: string;
+  date: string; // YYYY-MM-DD, local
+  weekday: number; // 0–6
+  hour: number; // local start hour
+}
+
+export interface Template extends SessionKey {
+  entries: Entry[];
+  focus: string | null;
+}
+
+const normalise = (n: string | null) => (n ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+
+/**
+ * Finds the earlier session that's most likely the same class: same name, same weekday,
+ * similar start time, same sport. Needs a reasonable match (name + sport, or weekday + time + sport).
+ */
+export function bestTemplate(target: SessionKey, templates: Template[], maxAgeDays = 120): Template | null {
+  let best: { t: Template; score: number } | null = null;
+  for (const t of templates) {
+    if (t.id === target.id || t.date >= target.date || !t.entries.length) continue;
+    if ((Date.parse(target.date) - Date.parse(t.date)) / 86400000 > maxAgeDays) continue;
+    let score = 0;
+    if (normalise(t.name) && normalise(t.name) === normalise(target.name)) score += 3;
+    if (t.weekday === target.weekday) score += 2;
+    if (Math.abs(t.hour - target.hour) <= 1) score += 1;
+    if (t.sport === target.sport) score += 1;
+    if (score >= 4 && (!best || score > best.score || (score === best.score && t.date > best.t.date))) best = { t, score };
+  }
+  return best?.t ?? null;
+}
