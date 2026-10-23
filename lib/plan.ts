@@ -99,6 +99,8 @@ export interface PlanInput {
   thresholdPace: string | null; // e.g. "4:12"
   weakStations: string[]; // biggest HYROX time losses, e.g. ["Wall Balls 100 reps"]
   timeOff?: TimeOff[];
+  /** "running": advice aimed at running faster. "hyrox" (default for now): adds station/erg/sim work. */
+  goal?: "running" | "hyrox";
 }
 
 const MULTIPLIER: Record<Verdict, [number, number]> = {
@@ -176,13 +178,24 @@ export function weeklyPlan(i: PlanInput): PlanAdvice {
   const hyrox = count((s) => s.category === "hyrox");
   const ergs = count((s) => s.category === "erg" || !!s.tags?.erg);
   const mixItem = (label: string, n: number, ideal: [number, number]): MixItem => ({ label, count: n, ideal, status: n < ideal[0] ? "low" : n > ideal[1] ? "high" : "ok" });
-  const mix = [
-    mixItem("Runs", runs, [5, 8]),
-    mixItem("Quality runs (tempo/intervals)", quality, [2, 3]),
-    mixItem("Strength / station work", strength + hyrox, [3, 5]),
-    mixItem("HYROX sims / compromised runs", hyrox, [1, 2]),
-    mixItem("SkiErg / Row", ergs, [2, 4]),
-  ];
+  const goal = i.goal ?? "hyrox";
+  const easyShare = i.hardShare === null ? null : Math.round((1 - i.hardShare) * 100);
+  const mix =
+    goal === "running"
+      ? [
+          mixItem("Runs", runs, [6, 10]),
+          mixItem("Quality runs (threshold/intervals)", quality, [2, 4]),
+          mixItem("Long runs (75 min+)", count((s) => s.category === "run" && s.durationS >= 75 * 60), [2, 2]),
+          mixItem("Strength (injury-proofing)", strength + hyrox, [2, 4]),
+          ...(easyShare === null ? [] : [{ label: "Easy share of time (aim ~80%)", count: easyShare, ideal: [75, 90] as [number, number], status: (easyShare < 75 ? "low" : "ok") as MixItem["status"] }]),
+        ]
+      : [
+          mixItem("Runs", runs, [5, 8]),
+          mixItem("Quality runs (tempo/intervals)", quality, [2, 3]),
+          mixItem("Strength / station work", strength + hyrox, [3, 5]),
+          mixItem("HYROX sims / compromised runs", hyrox, [1, 2]),
+          mixItem("SkiErg / Row", ergs, [2, 4]),
+        ];
 
   const weak = i.weakStations.slice(0, 2).join(" and ") || "your weakest stations";
   const tp = i.thresholdPace ? ` at ${i.thresholdPace}/km` : "";
@@ -202,14 +215,20 @@ export function weeklyPlan(i: PlanInput): PlanAdvice {
     suggestions.push({ action: "drop", session: "Drop one easy session this week, or shorten sessions by ~25%", why: "Bring load back towards your usual level." });
   } else {
     const adds: Suggestion[] = [];
-    if (hyrox === 0 && (i.daysToGoal === null || i.daysToGoal <= 112)) {
+    if (goal === "running") {
+      if (quality < 2) adds.push({ action: "add", session: `Threshold run: 3 × 10 min${tp} with 2 min easy jog`, why: `Only ${quality} quality run${quality === 1 ? "" : "s"} in 2 weeks — threshold work is the biggest lever on race pace.` });
+      if (!longRun) adds.push({ action: "add", session: "Long easy run, 75–90 min, conversational", why: "No long run in 10 days — it builds the aerobic base everything else sits on." });
+      if (runs < 6) adds.push({ action: "add", session: "Easy 30–45 min run (Z2)", why: `Only ${runs} runs in 2 weeks — more easy running is the safest way to get faster.` });
+      if (easyShare !== null && easyShare < 75) adds.push({ action: "swap", session: "Make your next 'steady' run truly easy (Z2)", why: `Only ${easyShare}% of your time is easy — too much moderate running blunts the quality sessions.` });
+    }
+    if (goal === "hyrox" && hyrox === 0 && (i.daysToGoal === null || i.daysToGoal <= 112)) {
       adds.push({ action: "add", session: `Compromised running: 4–6 × (1 km at race pace → ${weak})`, why: "No HYROX-specific work in 2 weeks — running well off the stations is the biggest HYROX skill." });
     }
-    if (strength + hyrox < 3) adds.push({ action: "add", session: `Station strength session: ${weak}, sled push/pull, lunges`, why: `Only ${strength + hyrox} strength/station sessions in 2 weeks.` });
-    if (!longRun) adds.push({ action: "add", session: "Long easy run, 75–90 min in Z2", why: "No long run in 10 days — it builds the aerobic engine for 8 km of racing." });
-    if (quality < 2) adds.push({ action: "add", session: `Threshold run: 3 × 10 min${tp} with 2 min easy`, why: `Only ${quality} quality run${quality === 1 ? "" : "s"} in 2 weeks.` });
-    if (ergs < 2) adds.push({ action: "add", session: "SkiErg/Row intervals: 5 × 500 m at race effort, 1 min rest", why: "Erg stations are 2 of the 8 — little erg work recently." });
-    adds.push({ action: "add", session: "Easy 30–45 min Z2 run or easy erg", why: "The cheapest way to add aerobic volume with little fatigue." });
+    if (goal === "hyrox" && strength + hyrox < 3) adds.push({ action: "add", session: `Station strength session: ${weak}, sled push/pull, lunges`, why: `Only ${strength + hyrox} strength/station sessions in 2 weeks.` });
+    if (goal === "hyrox" && !longRun) adds.push({ action: "add", session: "Long easy run, 75–90 min in Z2", why: "No long run in 10 days — it builds the aerobic engine for 8 km of racing." });
+    if (goal === "hyrox" && quality < 2) adds.push({ action: "add", session: `Threshold run: 3 × 10 min${tp} with 2 min easy`, why: `Only ${quality} quality run${quality === 1 ? "" : "s"} in 2 weeks.` });
+    if (goal === "hyrox" && ergs < 2) adds.push({ action: "add", session: "SkiErg/Row intervals: 5 × 500 m at race effort, 1 min rest", why: "Erg stations are 2 of the 8 — little erg work recently." });
+    adds.push({ action: "add", session: goal === "running" ? "Easy 30–45 min Z2 run" : "Easy 30–45 min Z2 run or easy erg", why: "The cheapest way to add aerobic volume with little fatigue." });
     if (verdict === "add") suggestions.push(adds[0]);
     else suggestions.push({ action: "keep", session: "Keep your planned sessions", why: "You're absorbing the current load well." });
     if (verdict === "maintain" && adds[0].session !== adds[adds.length - 1].session) {

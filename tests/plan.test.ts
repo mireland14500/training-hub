@@ -25,6 +25,7 @@ function input(dailyLoad: (i: number) => number, overrides: Partial<PlanInput> =
     daysToGoal: null,
     thresholdPace: "4:10",
     weakStations: ["Wall Balls"],
+    goal: "hyrox",
     ...overrides,
   };
 }
@@ -85,5 +86,14 @@ describe("time off", () => {
   it("goes back to normal advice two weeks later", () => {
     const p = weeklyPlan(input(() => 60, { timeOff: [{ start: "2026-08-20", end: "2026-08-25", reason: "ill" }] }));
     expect(p.verdict).toBe("maintain");
+  });
+});
+
+describe("running goal", () => {
+  it("suggests a threshold run first when quality is missing", () => {
+    const p = weeklyPlan(input((i) => (i >= 113 ? 20 : 70), { goal: "running" }));
+    expect(p.verdict).toBe("add");
+    expect(p.suggestions[0].session).toMatch(/Threshold run/);
+    expect(p.mix.map((m) => m.label)).toContain("Long runs (75 min+)");
   });
 });

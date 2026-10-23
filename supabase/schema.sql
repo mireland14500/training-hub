@@ -48,7 +48,9 @@ create table if not exists athlete (
   garmin_pred_half int,
   garmin_pred_marathon int,
   -- Converts Garmin's per-activity training load to this app's scale (~100 = 1 h at threshold).
-  garmin_load_scale numeric
+  garmin_load_scale numeric,
+  -- Show HYROX predictions and the Progress page (off = recovery + running focus).
+  show_predictions boolean not null default false
 );
 insert into athlete (id) values (1) on conflict do nothing;
 
@@ -163,6 +165,7 @@ alter table athlete add column if not exists garmin_pred_half int;
 alter table athlete add column if not exists garmin_pred_marathon int;
 alter table athlete add column if not exists garmin_load_scale numeric;
 alter table activities add column if not exists strava_best_efforts jsonb;
+alter table athlete add column if not exists show_predictions boolean not null default false;
 
 alter table strava_auth enable row level security;
 alter table athlete enable row level security;

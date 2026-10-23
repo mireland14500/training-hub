@@ -77,6 +77,7 @@ export interface AthleteRow {
   garmin_pred_half: number | null;
   garmin_pred_marathon: number | null;
   garmin_load_scale: number | null;
+  show_predictions: boolean;
 }
 
 export interface BenchmarkRow {
