@@ -15,5 +15,7 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
+  // Node.js, not Edge: Vercel services don't support Edge Functions.
+  runtime: "nodejs",
   matcher: ["/((?!_next/static|_next/image|icons/|favicon.ico|apple-touch-icon.png).*)"],
 };
