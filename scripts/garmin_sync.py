@@ -37,7 +37,7 @@ try:
         GarminConnectTooManyRequestsError,
     )
 except ImportError:
-    sys.exit("Missing dependency. Run:  pip3 install -r scripts/requirements.txt")
+    sys.exit("The Garmin library isn't installed. Run it with:  npm run garmin")
 
 ROOT = Path(__file__).resolve().parent.parent
 TOKENSTORE = os.getenv("GARMINTOKENS", "~/.garminconnect")

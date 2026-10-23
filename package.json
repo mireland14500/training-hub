@@ -8,7 +8,7 @@
     "start": "next start",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "garmin": "test -d .venv-garmin || (python3 -m venv .venv-garmin && .venv-garmin/bin/pip install -q -r scripts/requirements.txt); .venv-garmin/bin/python scripts/garmin_sync.py"
+    "garmin": "sh scripts/garmin.sh"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.1.0",

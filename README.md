@@ -97,7 +97,7 @@ npm run garmin -- --days 60    # backfill more history
 npm run garmin -- --debug      # show Garmin's raw responses if something looks wrong
 ```
 
-- **What you need:** Python 3, which macOS already has. The first run creates a `.venv-garmin` folder and installs the [`garminconnect`](https://github.com/cyberjunky/python-garminconnect) library into it.
+- **What you need:** Python 3.12 or newer. macOS comes with 3.9, so install a newer one with `brew install python@3.12` or from python.org. The first run creates a `.venv-garmin` folder and installs the [`garminconnect`](https://github.com/cyberjunky/python-garminconnect) library into it. If setup is interrupted, the next run repairs it.
 - **Logging in:** the first run asks for your Garmin email, password and MFA code if you use one. After that, login tokens are saved in `~/.garminconnect`, so your password isn't stored. To avoid the prompt, you can instead put `GARMIN_EMAIL` and `GARMIN_PASSWORD` in `.env.local`.
 - **Run it each morning**, or schedule it on your Mac, e.g. `crontab -e` and add:
   `30 7 * * * cd /path/to/training-hub && npm run garmin >> garmin.log 2>&1`
