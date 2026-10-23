@@ -52,9 +52,6 @@ create table if not exists athlete (
 );
 insert into athlete (id) values (1) on conflict do nothing;
 
--- Make the API pick up new columns immediately after an upgrade.
-notify pgrst, 'reload schema';
-
 -- Every session: Strava activities, erg photo logs, HYROX sims/races and manual entries.
 -- sport is the Strava sport_type, or 'SkiErg' / 'RowErg' / 'BikeErg' / 'HYROX' for logged sessions.
 -- HYROX sessions keep their splits in details: { kind, runs[8], stations{...}, roxzone_s }.

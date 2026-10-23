@@ -15,7 +15,7 @@ first login; after that, tokens are stored in ~/.garminconnect.
 
 Usage (from the training-hub folder):
   npm run garmin                 # last 7 days (30 on the first run)
-  npm run garmin -- --days 60    # backfill more history
+  npm run garmin -- --days 60    # backfill more recovery history
   npm run garmin -- --debug      # print Garmin's raw responses
 """
 
@@ -105,6 +105,10 @@ class Supabase:
 
     def update_activity(self, activity_id: str, fields: dict) -> None:
         self.request("PATCH", f"/activities?id=eq.{urllib.parse.quote(activity_id)}", fields)
+
+    def has_garmin_loads(self) -> bool:
+        rows = self.request("GET", "/activities?select=id&garmin_load=not.is.null&limit=1", prefer="")
+        return bool(rows)
 
     def last_garmin_sync(self) -> str | None:
         rows = self.request("GET", "/athlete?id=eq.1&select=garmin_synced_at", prefer="")
@@ -262,7 +266,8 @@ def match_activities(api: Garmin, db: Supabase, days: int) -> tuple[int, int]:
 def main() -> None:
     global DEBUG
     parser = argparse.ArgumentParser(description="Import Garmin recovery data into Training Hub")
-    parser.add_argument("--days", type=int, help="days to import (default 7, or 30 on the first run)")
+    parser.add_argument("--days", type=int, help="days of recovery data (default 7, or 30 on the first run)")
+    parser.add_argument("--activity-days", type=int, help="days of activities to match (default 14, or 120 the first time)")
     parser.add_argument("--debug", action="store_true", help="print Garmin's raw responses")
     args = parser.parse_args()
     DEBUG = args.debug
@@ -291,14 +296,15 @@ def main() -> None:
             imported += 1
             print(f"  {d}  " + "  ".join(f"{k}={v}" for k, v in row.items()))
 
-    first_run = not db.last_garmin_sync()
     fields = threshold_and_vo2max(api)
     fields.update(race_predictions(api))
     fields["garmin_synced_at"] = datetime.now(timezone.utc).isoformat()
     db.update_athlete(fields)
 
-    # A year of activities on the first run (one request), then a rolling window.
-    matched, total = match_activities(api, db, 365 if first_run else max(days, 14))
+    # ~4 months of activities the first time (one request — enough for fitness/fatigue history),
+    # then a rolling two weeks.
+    activity_days = args.activity_days or (14 if db.has_garmin_loads() else 120)
+    matched, total = match_activities(api, db, activity_days)
 
     print(f"\nDone: {imported} day(s) of recovery data.")
     if "garmin_lt_speed" in fields:
