@@ -26,6 +26,11 @@ Tap any session to tell the app what it really was. This is useful for gym class
 
 **+ Add** on any day logs a class that isn't on Strava.
 
+**Time off:** use **Mark time off** (ill, injured, holiday) on the calendar.
+- While you're off, the weekly plan says rest.
+- For two weeks afterwards it gives build-back advice: about 60–80% of normal load in week 1, then back to normal.
+- "Am I getting fitter?" stops counting the dip in training volume and easy-run heart rate against you.
+
 **Same as last week?** Most classes repeat. Once you've filled in a class, the calendar spots the next one (same name, or same weekday, time and type) and offers to copy its details in one tap. The session editor also has **Copy from a previous session…** for any earlier session with details.
 
 How session details feed the analysis:
@@ -127,6 +132,7 @@ Race = 8 × 1 km run + 8 stations + Roxzone. Each segment uses your most recent 
 | Other stations | Latest sim/race split, or your best benchmark scaled to race distance/reps and race weight, + 10% if it was done fresh. |
 | Roxzone | From your latest full sim or race. |
 | Older races | A race or sim older than 4 months (up to 18 months) is still used for any segment with no recent data. It's marked "N months ago" and gets a wider range. |
+| Race time, no splits | HYROX races found on Strava are activities named "HYROX…", 45–150 min, not named like a training session. For segments with no other data, the race time is spread over the segments in the proportions of a fast race. The fastest race is shown as **Your best** next to the prediction. |
 | No data | Typical time for your division, shown in amber so you know which segments to benchmark. |
 
 The likely range widens for segments that rely on typical times. The reference "typical" and "top ~15%" splits are rough guides from public results; your own data always replaces them.
@@ -161,7 +167,8 @@ When you can add a session, the app suggests the most useful one, in this order:
 | Readiness | Weighted blend of form, HRV vs your 28-day baseline, resting HR vs baseline, sleep score, Body Battery, soreness and energy. |
 | Best efforts | Fastest distance covered in 3/6/12/20/30/60 minutes, taken from Strava's per-second streams. GPS jumps faster than 7 m/s are clipped, and treadmill runs are skipped. |
 | Critical speed | Linear fit of distance against time over your 3–20 minute best efforts (last 90 days). |
-| VDOT, paces, predictions | Daniels/Gilbert oxygen-cost equations. The source, in order: manual override, then Garmin lactate threshold (last 120 days), then a race from the last 4 months, then the best of the critical-speed and best-effort estimates. |
+| VDOT, paces, predictions | Daniels/Gilbert oxygen-cost equations. A manual override wins, then a race you entered in Settings (last 4 months). Otherwise it takes the **strongest** of: Garmin lactate threshold, your best Strava 5K/10K/15K/10 mile/half from the last 4 months, critical speed, and best 20/30/60-min efforts. Training and illness only make you look slower, never faster. |
+| PBs | Strava's best efforts (1K, mile, 5K, 10K, half, marathon) inside each run. The Running page shows the best of the imported year and of the last 90 days next to the predictions. |
 | HR zones | Friel zones as a % of threshold HR. |
 | Efficiency factor | Metres per minute ÷ average HR, on easy runs. |
 | Decoupling | Change in pace:HR between the first and second half of runs of 40 minutes or more. |

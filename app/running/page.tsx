@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { EfficiencyChart, ThresholdTrendChart, WeeklyKmChart } from "@/components/Charts";
 import { formatDuration, formatPace, hrZoneBounds } from "@/lib/analysis";
 import { localDate, runningData } from "@/lib/data";
@@ -85,36 +86,56 @@ export default async function Running() {
         </div>
 
         <div className="card">
-          <div className="label mb-2">Race predictions</div>
+          <div className="label mb-2">Race times: predicted vs actual</div>
           <table className="w-full text-sm">
-            {garmin.length > 0 && (
-              <thead className="text-xs text-muted">
-                <tr>
-                  <th />
-                  <th className="text-right font-normal">This app</th>
-                  <th className="text-right font-normal">Garmin</th>
-                </tr>
-              </thead>
-            )}
-            <tbody className="divide-y divide-border">
+            <thead className="text-xs text-muted">
+              <tr>
+                <th />
+                <th className="text-right font-normal">Predicted</th>
+                {garmin.length > 0 && <th className="text-right font-normal">Garmin</th>}
+                <th className="text-right font-normal">Best · 12 mo</th>
+                <th className="text-right font-normal">Last 90 d</th>
+              </tr>
+            </thead>
+            <tbody className="tabular divide-y divide-border">
               {d.predictions.map((p, i) => (
                 <tr key={p.name}>
-                  <td className="py-2">{p.name}</td>
-                  <td className="tabular py-2 text-right font-semibold">
-                    {formatDuration(p.time)}
-                    <div className="text-xs font-normal text-muted">{formatPace(p.time / (p.m / 1000))}/km</div>
+                  <td className="py-2 pr-1">{p.name.replace(" marathon", "")}</td>
+                  <td className="py-2 text-right font-semibold">
+                    {p.time ? formatDuration(p.time) : "–"}
+                    {p.time && <div className="text-[11px] font-normal text-muted">{formatPace(p.time / (p.m / 1000))}/km</div>}
                   </td>
-                  {garmin.length > 0 && (
-                    <td className="tabular py-2 pl-3 text-right font-semibold">
-                      {garmin[i] ? formatDuration(garmin[i]!) : "–"}
-                      {garmin[i] && <div className="text-xs font-normal text-muted">{formatPace(garmin[i]! / (p.m / 1000))}/km</div>}
-                    </td>
-                  )}
+                  {garmin.length > 0 && <td className="py-2 pl-2 text-right">{garmin[i] ? formatDuration(garmin[i]!) : "–"}</td>}
+                  <td className="py-2 pl-2 text-right">
+                    {p.best ? (
+                      <Link href={`/session/${p.best.activityId}`} className="font-semibold text-good hover:underline">
+                        {formatDuration(p.best.seconds)}
+                        <div className="text-[11px] font-normal text-muted">{p.best.date.slice(2)}</div>
+                      </Link>
+                    ) : (
+                      "–"
+                    )}
+                  </td>
+                  <td className="py-2 pl-2 text-right">{p.recent ? formatDuration(p.recent.seconds) : "–"}</td>
+                </tr>
+              ))}
+              {d.shortBests.map((b) => (
+                <tr key={b.name}>
+                  <td className="py-2">{b.name}</td>
+                  <td />
+                  {garmin.length > 0 && <td />}
+                  <td className="py-2 pl-2 text-right font-semibold text-good">{b.best ? formatDuration(b.best.seconds) : "–"}</td>
+                  <td className="py-2 pl-2 text-right">{b.recent ? formatDuration(b.recent.seconds) : "–"}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <p className="mt-2 text-xs text-muted">Assumes training specific to the distance. Marathon predictions are optimistic without high mileage.{garmin.length > 0 ? " Your HYROX run splits use Garmin's 10K prediction." : ""}</p>
+          <p className="mt-2 text-xs text-muted">
+            {d.hasStravaBests
+              ? "Best and recent times are Strava's best efforts inside your runs (last 12 months imported). "
+              : "Your Strava best efforts appear after runs are analysed: Settings → Re-analyse runs, then Sync Strava. "}
+            Marathon predictions are optimistic without high mileage.
+          </p>
         </div>
       </div>
 

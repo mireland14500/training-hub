@@ -339,3 +339,25 @@ export async function copySessionDetails(form: FormData) {
   revalidatePath("/", "layout");
   redirect(`/calendar?week=${localDate(target.start_time)}`);
 }
+
+const OFF_REASONS = ["ill", "injury", "holiday", "other"];
+
+/** Marks days off training (ill, injured, holiday) so the analysis doesn't read them as lost fitness. */
+export async function saveTimeOff(form: FormData) {
+  const start = str(form, "start");
+  const end = str(form, "end") ?? start;
+  if (!start || !end) throw new Error("Pick the dates");
+  const reason = OFF_REASONS.includes(String(form.get("reason"))) ? String(form.get("reason")) : "ill";
+  const [from, to] = start <= end ? [start, end] : [end, start];
+  const { error } = await db().from("time_off").insert({ start_date: from, end_date: to, reason, notes: str(form, "notes") });
+  if (error) throw error;
+  revalidatePath("/", "layout");
+  redirect(`/calendar?week=${from}`);
+}
+
+export async function deleteTimeOff(form: FormData) {
+  const id = str(form, "id");
+  if (id) await db().from("time_off").delete().eq("id", id);
+  revalidatePath("/", "layout");
+  redirect(`/calendar${str(form, "week") ? `?week=${str(form, "week")}` : ""}`);
+}

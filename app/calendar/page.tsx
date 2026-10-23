@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { copySessionDetails } from "@/app/actions";
+import { copySessionDetails, deleteTimeOff, saveTimeOff } from "@/app/actions";
 import { CATEGORY_COLOR, CATEGORY_LABEL, FOCUS_LABEL } from "@/components/categories";
 import { formatDuration } from "@/lib/analysis";
 import { calendarData, type CalendarSession } from "@/lib/data";
@@ -7,6 +7,7 @@ import { calendarData, type CalendarSession } from "@/lib/data";
 export const dynamic = "force-dynamic";
 
 const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const OFF_LABEL = { ill: "🤒 Ill", injury: "🩹 Injured", holiday: "🌴 Holiday", other: "Off" } as const;
 
 function dayLabel(date: string) {
   return new Date(date + "T00:00:00Z").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
@@ -116,7 +117,7 @@ export default async function Calendar({ searchParams }: { searchParams: Promise
                     <Link
                       key={c.date}
                       href={`/calendar?week=${c.date}`}
-                      className={`flex h-11 flex-col items-center justify-center rounded-lg text-xs hover:bg-bg ${c.inMonth ? "" : "opacity-35"} ${c.date === d.today ? "font-bold text-accent" : ""}`}
+                      className={`flex h-11 flex-col items-center justify-center rounded-lg text-xs hover:bg-bg ${c.inMonth ? "" : "opacity-35"} ${c.date === d.today ? "font-bold text-accent" : ""} ${c.off ? "bg-warn/15" : ""}`}
                     >
                       <span>{Number(c.date.slice(8))}</span>
                       <span className="mt-0.5 flex gap-0.5">
@@ -130,6 +131,27 @@ export default async function Calendar({ searchParams }: { searchParams: Promise
               );
             })}
           </div>
+          <details className="mt-3 rounded-xl border border-border p-2 text-sm">
+            <summary className="cursor-pointer font-semibold">🤒 Mark time off (ill, injured, holiday)</summary>
+            <form action={saveTimeOff} className="mt-2 grid grid-cols-2 gap-2">
+              <label className="block">
+                <span className="text-[11px] uppercase text-muted">From</span>
+                <input className="input mt-0.5 py-1.5" type="date" name="start" defaultValue={d.today} required />
+              </label>
+              <label className="block">
+                <span className="text-[11px] uppercase text-muted">To</span>
+                <input className="input mt-0.5 py-1.5" type="date" name="end" defaultValue={d.today} required />
+              </label>
+              <select name="reason" className="input py-1.5" defaultValue="ill">
+                <option value="ill">Ill</option>
+                <option value="injury">Injured</option>
+                <option value="holiday">Holiday</option>
+                <option value="other">Other</option>
+              </select>
+              <button className="btn-primary py-1.5 text-sm">Save</button>
+              <p className="col-span-2 text-xs text-muted">Your weekly plan switches to rest / build-back advice, and the fitness verdict won&apos;t count the dip against you.</p>
+            </form>
+          </details>
           <div className="mt-2 flex flex-wrap justify-center gap-x-3 gap-y-1 text-[11px] text-muted">
             {Object.entries(CATEGORY_LABEL).map(([k, label]) => (
               <span key={k} className="flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ background: CATEGORY_COLOR[k] }} />{label}</span>
@@ -179,6 +201,14 @@ export default async function Calendar({ searchParams }: { searchParams: Promise
               <div className={`text-sm font-semibold ${day.date === d.today ? "text-accent" : ""}`}>{dayLabel(day.date)}</div>
               {day.checkin?.hrv && <div className="tabular text-[11px] text-muted" title="Overnight HRV">♥ {day.checkin.hrv}</div>}
             </div>
+            {day.off && (
+              <form action={deleteTimeOff} className="mb-2 flex items-center justify-between rounded-lg bg-warn/15 px-2 py-1 text-xs">
+                <span>{OFF_LABEL[day.off.reason]}</span>
+                <input type="hidden" name="id" value={day.off.id} />
+                <input type="hidden" name="week" value={d.monday} />
+                {day.date === day.off.start && <button className="text-muted hover:text-bad" title="Remove this time off">✕</button>}
+              </form>
+            )}
             <div className="space-y-2">
               {day.sessions.map((s) => <SessionCard key={s.id} s={s} />)}
               <Link href={`/session/new?date=${day.date}`} className="block rounded-xl border border-dashed border-border py-1.5 text-center text-xs text-muted hover:border-accent hover:text-accent">

@@ -50,6 +50,7 @@ export interface ActivityRow {
   garmin_te_aerobic: number | null;
   garmin_te_anaerobic: number | null;
   garmin_type: string | null;
+  strava_best_efforts: Record<string, number> | null;
   notes: string | null;
 }
 
@@ -106,4 +107,12 @@ export async function getAthlete(): Promise<AthleteRow> {
   const { data, error } = await db().from("athlete").select("*").eq("id", 1).single();
   if (error) throw error;
   return data as AthleteRow;
+}
+
+export interface TimeOffRow {
+  id: string;
+  start_date: string;
+  end_date: string;
+  reason: "ill" | "injury" | "holiday" | "other";
+  notes: string | null;
 }

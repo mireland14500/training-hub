@@ -42,7 +42,25 @@ export interface SessionSummary {
   tags?: { run: boolean; erg: boolean; station: boolean };
 }
 
-export type Verdict = "taper" | "deload" | "reduce" | "maintain" | "add";
+export type Verdict = "taper" | "deload" | "reduce" | "maintain" | "add" | "rest" | "return";
+
+export interface TimeOff {
+  id?: string;
+  start: string;
+  end: string;
+  reason: "ill" | "injury" | "holiday" | "other";
+}
+
+const OFF_LABEL: Record<TimeOff["reason"], string> = { ill: "ill", injury: "injured", holiday: "on holiday", other: "off training" };
+
+/** Whether you're off now, or came back within the last 14 days. */
+export function timeOffStatus(periods: TimeOff[], today: string): { now: TimeOff | null; back: { period: TimeOff; days: number } | null } {
+  const now = periods.find((p) => p.start <= today && p.end >= today) ?? null;
+  const recent = periods
+    .filter((p) => p.end < today && (Date.parse(today) - Date.parse(p.end)) / 86400000 <= 14)
+    .sort((a, b) => (a.end < b.end ? 1 : -1))[0];
+  return { now, back: recent ? { period: recent, days: Math.round((Date.parse(today) - Date.parse(recent.end)) / 86400000) } : null };
+}
 
 export interface Suggestion {
   action: "add" | "drop" | "swap" | "keep";
@@ -80,6 +98,7 @@ export interface PlanInput {
   daysToGoal: number | null;
   thresholdPace: string | null; // e.g. "4:12"
   weakStations: string[]; // biggest HYROX time losses, e.g. ["Wall Balls 100 reps"]
+  timeOff?: TimeOff[];
 }
 
 const MULTIPLIER: Record<Verdict, [number, number]> = {
@@ -88,6 +107,8 @@ const MULTIPLIER: Record<Verdict, [number, number]> = {
   reduce: [0.8, 0.9],
   deload: [0.55, 0.7],
   taper: [0.5, 0.65],
+  rest: [0, 0.3],
+  return: [0.6, 0.8],
 };
 
 function addDays(date: string, n: number): string {
@@ -196,16 +217,48 @@ export function weeklyPlan(i: PlanInput): PlanAdvice {
     }
   }
 
+  // Illness, injury or a holiday: the drop in load is expected, so don't read it as "add more".
+  const off = timeOffStatus(i.timeOff ?? [], i.today);
+  let multiplier = MULTIPLIER[verdict];
+  if (verdict !== "taper" && (off.now || off.back)) {
+    reasons.length = 0;
+    suggestions.length = 0;
+    if (off.now) {
+      verdict = "rest";
+      reasons.push(`You're marked as ${OFF_LABEL[off.now.reason]} (${off.now.start} – ${off.now.end}).`);
+      if (off.now.reason === "ill") {
+        suggestions.push({ action: "drop", session: "Rest. If symptoms are only above the neck, an easy 20–30 min walk or jog is OK", why: "Training hard while ill lengthens recovery and risks a setback." });
+        suggestions.push({ action: "keep", session: "Resume once you've been symptom-free for 24–48 h", why: "Then follow the build-back advice here." });
+      } else {
+        suggestions.push({ action: "keep", session: "Easy movement only, as you feel able", why: "A short break costs little fitness — around 2 weeks before it drops noticeably." });
+      }
+    } else if (off.back) {
+      verdict = "return";
+      const p = off.back.period;
+      reasons.push(`You were ${OFF_LABEL[p.reason]} ${p.start} – ${p.end}, so lower training load and fitness numbers are expected — not lost fitness.`);
+      if (off.back.days <= 7) {
+        multiplier = [0.6, 0.8];
+        suggestions.push({ action: "keep", session: "Week 1 back: ~60–80% of normal volume, mostly easy", why: "Your body is still recovering even when you feel fine." });
+        suggestions.push({ action: "swap", session: "Hold off hard intervals and sims for 3–5 days", why: "Heart rate and HRV usually take a few days to settle after illness." });
+      } else {
+        multiplier = [0.8, 1.0];
+        suggestions.push({ action: "add", session: "Week 2 back: bring back one quality session, then build to normal", why: "Most fitness returns within 1–2 weeks after a short illness." });
+      }
+    }
+  }
+
   const headline = {
     taper: "Taper week — less volume, stay sharp",
     deload: "Take a lighter week",
     reduce: "Ease off a little this week",
     maintain: "Keep training as planned",
     add: "You can add a session this week",
+    rest: "Rest and recover",
+    return: "Build back gradually",
   }[verdict];
 
   const base = Math.max(ctl * 7, 150);
-  const [lo, hi] = MULTIPLIER[verdict];
+  const [lo, hi] = multiplier;
   const weekSoFar = i.sessions.filter((s) => s.date >= thisWeek && s.date <= i.today).reduce((a, s) => a + s.load, 0);
   const daysLeft = 6 - ((new Date(i.today + "T00:00:00Z").getUTCDay() + 6) % 7);
 

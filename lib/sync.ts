@@ -5,7 +5,8 @@ import { getActivity, getStreams, isRun, listActivities, StravaRateLimitError, t
 
 const INITIAL_HISTORY_DAYS = 365;
 // Strava allows 100 read requests / 15 min; leave room for listing and webhooks.
-const MAX_STREAM_FETCHES_PER_SYNC = 40;
+// Runs need two requests each (streams + detail for Strava's best efforts).
+const MAX_STREAM_FETCHES_PER_SYNC = 30;
 
 function toRow(a: StravaActivity, p: AthleteProfile) {
   const { load, method } = sessionLoad(
@@ -47,7 +48,13 @@ async function upsertActivity(a: StravaActivity, p: AthleteProfile): Promise<str
 }
 
 /** Fetches streams for one activity and stores zones, best efforts and decoupling. */
-async function processStreams(rowId: string, externalId: number, sport: string, trainer: boolean, p: AthleteProfile) {
+/** Strava's own best efforts (1K, mile, 5K, 10K, half…) from a run's detail, elapsed seconds. */
+function stravaBestEfforts(a: StravaActivity): Record<string, number> | null {
+  if (!a.best_efforts?.length) return null;
+  return Object.fromEntries(a.best_efforts.map((b) => [b.name, b.elapsed_time]));
+}
+
+async function processStreams(rowId: string, externalId: number, sport: string, trainer: boolean, p: AthleteProfile, detail?: StravaActivity) {
   const s = await getStreams(externalId);
   const time = s.time?.data ?? [];
   const dist = s.distance?.data ?? [];
@@ -57,6 +64,7 @@ async function processStreams(rowId: string, externalId: number, sport: string, 
   // Treadmill distance comes from the watch's accelerometer, too rough for best efforts.
   if (isRun(sport) && dist.length && !trainer && sport !== "VirtualRun") update.best_efforts = bestEfforts(time, dist);
   if (isRun(sport) && hr.length && dist.length && time[time.length - 1] >= 40 * 60) update.decoupling = decoupling(time, dist, hr);
+  if (isRun(sport) && !trainer && sport !== "VirtualRun") update.strava_best_efforts = stravaBestEfforts(detail ?? (await getActivity(externalId)));
   const { error } = await db().from("activities").update(update).eq("id", rowId);
   if (error) throw error;
 }
@@ -131,7 +139,7 @@ export async function syncOneActivity(externalId: number): Promise<void> {
   const athlete = await getAthlete();
   const a = await getActivity(externalId);
   const id = await upsertActivity(a, athlete);
-  await processStreams(id, a.id, a.sport_type, !!a.trainer, athlete);
+  await processStreams(id, a.id, a.sport_type, !!a.trainer, athlete, a);
 }
 
 export async function deleteStravaActivity(externalId: number): Promise<void> {

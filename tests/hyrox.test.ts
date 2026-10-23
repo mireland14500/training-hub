@@ -95,6 +95,14 @@ describe("prediction", () => {
     expect(p.confidence).toBe(1);
   });
 
+  it("scales segments from a race time without splits (e.g. from Strava)", () => {
+    const total = 71 * 60 + 20;
+    const p = predictHyrox({ ...base, asOf: "2026-10-23", raceTotals: [{ date: "2026-04-12", total, label: "race on Strava" }] });
+    expect(p.total).toBeCloseTo(total, 5); // no other data: reproduces the race
+    expect(p.segments.find((s) => s.key === "wall_balls")!.detail).toMatch(/share of your 1:11:20 race on Strava/);
+    expect(p.confidence).toBe(1);
+  });
+
   it("ignores data older than the window", () => {
     const p = predictHyrox({ ...base, benchmarks: [{ date: "2025-01-01", station: "row", time_s: 200, amount: null, load_kg: null, fresh: true }] });
     expect(p.segments.find((s) => s.key === "row")!.source).toBe("reference");

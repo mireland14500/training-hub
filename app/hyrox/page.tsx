@@ -37,9 +37,24 @@ export default async function Hyrox() {
 
       <div className="grid gap-4 md:grid-cols-[1fr_1.5fr]">
         <div className="card">
-          <div className="label">Predicted finish time</div>
-          <div className="tabular mt-1 text-5xl font-bold">{formatDuration(p.total)}</div>
-          <div className="tabular mt-1 text-sm text-muted">likely range {formatDuration(p.low)} – {formatDuration(p.high)}</div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <div className="label">Predicted</div>
+              <div className="tabular mt-1 text-4xl font-bold">{formatDuration(p.total)}</div>
+              <div className="tabular mt-1 text-xs text-muted">range {formatDuration(p.low)} – {formatDuration(p.high)}</div>
+            </div>
+            <div>
+              <div className="label">Your best</div>
+              {d.pb ? (
+                <>
+                  <div className="tabular mt-1 text-4xl font-bold text-good">{formatDuration(d.pb.total)}</div>
+                  <div className="mt-1 truncate text-xs text-muted">{d.pb.name} · {d.pb.date}</div>
+                </>
+              ) : (
+                <div className="mt-2 text-sm text-muted">No race yet — log one below.</div>
+              )}
+            </div>
+          </div>
           <div className="mt-4">
             <div className="flex justify-between text-xs text-muted">
               <span>Based on your own data</span>
@@ -137,16 +152,40 @@ export default async function Hyrox() {
 
       <div className="grid gap-4 md:grid-cols-2">
         <div className="card">
-          <div className="label mb-2">Sims & races</div>
-          {d.sessions.length === 0 && <p className="text-sm text-muted">None yet. A full or half sim every 3–4 weeks is the best way to track race fitness.</p>}
+          <div className="label mb-2">Your races</div>
+          {d.results.length === 0 && (
+            <p className="text-sm text-muted">
+              None found. Races are picked up from Strava when the activity name includes &quot;HYROX&quot;, or log one with splits via <Link href="/log/hyrox" className="text-accent">+ Sim/race</Link>.
+            </p>
+          )}
           <ul className="divide-y divide-border">
-            {d.sessions.map((s) => (
-              <li key={s.id} className="flex justify-between py-2 text-sm">
-                <span>{localDate(s.start_time)} · {s.name}</span>
-                <span className="tabular font-semibold">{formatDuration(s.duration_s)}</span>
+            {d.results.map((r) => (
+              <li key={r.id} className="flex items-center justify-between gap-2 py-2 text-sm">
+                <div className="min-w-0">
+                  <Link href={`/session/${r.id}`} className="block truncate hover:text-accent">{r.date} · {r.name}</Link>
+                  <div className="text-xs text-muted">
+                    {r.hasSplits ? "Splits logged" : <>From Strava — <Link href="/log/hyrox" className="text-accent">add splits</Link> for a sharper prediction</>}
+                  </div>
+                </div>
+                <span className={`tabular shrink-0 font-semibold ${d.pb?.id === r.id ? "text-good" : ""}`}>{formatDuration(r.total)}</span>
               </li>
             ))}
           </ul>
+          {d.sessions.some((s) => (s.details as { kind?: string } | null)?.kind !== "race") && (
+            <>
+              <div className="label mb-1 mt-4">Sims</div>
+              <ul className="divide-y divide-border">
+                {d.sessions
+                  .filter((s) => (s.details as { kind?: string } | null)?.kind !== "race")
+                  .map((s) => (
+                    <li key={s.id} className="flex justify-between py-2 text-sm">
+                      <span>{localDate(s.start_time)} · {s.name}</span>
+                      <span className="tabular font-semibold">{formatDuration(s.duration_s)}</span>
+                    </li>
+                  ))}
+              </ul>
+            </>
+          )}
         </div>
         <div className="card">
           <div className="label mb-2">Recent station benchmarks</div>

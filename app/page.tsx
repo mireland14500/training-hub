@@ -26,6 +26,8 @@ const VERDICT: Record<Verdict, { label: string; color: string }> = {
   reduce: { label: "REDUCE", color: "var(--warn)" },
   deload: { label: "DELOAD", color: "var(--bad)" },
   taper: { label: "TAPER", color: "var(--c-ski)" },
+  rest: { label: "REST", color: "var(--c-other)" },
+  return: { label: "BUILD BACK", color: "var(--c-ski)" },
 };
 const ACTION_ICON = { add: "＋", drop: "−", swap: "⇄", keep: "✓" };
 
@@ -142,6 +144,11 @@ export default async function Dashboard() {
           <div className="label">Predicted HYROX time</div>
           <div className="tabular mt-1 text-4xl font-bold">{formatDuration(d.prediction.total)}</div>
           <div className="tabular text-sm text-muted">range {formatDuration(d.prediction.low)} – {formatDuration(d.prediction.high)}</div>
+          {d.hyroxPb && (
+            <div className="tabular mt-1 text-sm">
+              Your best <b className="text-good">{formatDuration(d.hyroxPb.total)}</b> <span className="text-muted">({d.hyroxPb.date})</span>
+            </div>
+          )}
           <div className="mt-2 text-xs text-muted">{Math.round(d.prediction.confidence * 100)}% from your own data · see breakdown →</div>
         </Link>
         <div className="card">

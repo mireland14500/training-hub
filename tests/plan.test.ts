@@ -71,3 +71,19 @@ describe("categorize", () => {
     expect(categorize("RowErg", null)).toBe("erg");
   });
 });
+
+describe("time off", () => {
+  it("says rest while you're ill, even if load looks low", () => {
+    const p = weeklyPlan(input((i) => (i >= 113 ? 0 : 70), { timeOff: [{ start: "2026-09-26", end: "2026-09-29", reason: "ill" }] }));
+    expect(p.verdict).toBe("rest");
+  });
+  it("builds back gradually after illness instead of 'add'", () => {
+    const p = weeklyPlan(input((i) => (i >= 106 && i < 113 ? 0 : 70), { timeOff: [{ start: "2026-09-14", end: "2026-09-21", reason: "ill" }] }));
+    expect(p.verdict).toBe("return");
+    expect(p.reasons[0]).toMatch(/expected — not lost fitness/);
+  });
+  it("goes back to normal advice two weeks later", () => {
+    const p = weeklyPlan(input(() => 60, { timeOff: [{ start: "2026-08-20", end: "2026-08-25", reason: "ill" }] }));
+    expect(p.verdict).toBe("maintain");
+  });
+});

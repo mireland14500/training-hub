@@ -96,6 +96,8 @@ create table if not exists activities (
   garmin_te_aerobic numeric,
   garmin_te_anaerobic numeric,
   garmin_type text,
+  -- Strava's best efforts within this run, elapsed seconds: { "1K": 215, "5K": 1170, ... }
+  strava_best_efforts jsonb,
   notes text,
   created_at timestamptz default now()
 );
@@ -112,6 +114,16 @@ create table if not exists checkins (
   training_readiness int,
   soreness int check (soreness between 1 and 5),
   energy int check (energy between 1 and 5),
+  notes text,
+  created_at timestamptz default now()
+);
+
+-- Days off training (illness, injury, holiday), so dips aren't read as lost fitness.
+create table if not exists time_off (
+  id uuid primary key default gen_random_uuid(),
+  start_date date not null,
+  end_date date not null,
+  reason text not null default 'ill' check (reason in ('ill', 'injury', 'holiday', 'other')),
   notes text,
   created_at timestamptz default now()
 );
@@ -150,12 +162,14 @@ alter table athlete add column if not exists garmin_pred_10k int;
 alter table athlete add column if not exists garmin_pred_half int;
 alter table athlete add column if not exists garmin_pred_marathon int;
 alter table athlete add column if not exists garmin_load_scale numeric;
+alter table activities add column if not exists strava_best_efforts jsonb;
 
 alter table strava_auth enable row level security;
 alter table athlete enable row level security;
 alter table activities enable row level security;
 alter table checkins enable row level security;
 alter table benchmarks enable row level security;
+alter table time_off enable row level security;
 
 -- Private bucket for workout photos (erg monitors, whiteboards, results).
 insert into storage.buckets (id, name, public)

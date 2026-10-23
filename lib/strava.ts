@@ -93,6 +93,8 @@ export interface StravaActivity {
   suffer_score?: number | null;
   has_heartrate: boolean;
   trainer?: boolean;
+  /** Only on the detailed activity (GET /activities/:id) for runs. */
+  best_efforts?: { name: string; elapsed_time: number; moving_time: number; distance: number; pr_rank: number | null }[];
 }
 
 export function listActivities(afterEpoch: number, page: number): Promise<StravaActivity[]> {

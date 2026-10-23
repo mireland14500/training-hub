@@ -17,7 +17,7 @@ import {
   round,
   type PmcPoint,
 } from "./analysis";
-import { db, getAthlete, type ActivityRow, type AthleteRow, type BenchmarkRow, type CheckinRow } from "./db";
+import { db, getAthlete, type ActivityRow, type AthleteRow, type BenchmarkRow, type CheckinRow, type TimeOffRow } from "./db";
 import {
   bestErg1k,
   opportunities,
@@ -32,7 +32,7 @@ import {
   type Benchmark,
   type Prediction,
 } from "./hyrox";
-import { categorize, weeklyPlan, type SessionSummary } from "./plan";
+import { categorize, weeklyPlan, type SessionSummary, type TimeOff } from "./plan";
 import {
   addEntryVolumes,
   benchmarksFromEntries,
@@ -116,6 +116,12 @@ export async function getCheckins(sinceDays: number): Promise<CheckinRow[]> {
   return data as CheckinRow[];
 }
 
+export async function getTimeOff(sinceDays: number): Promise<TimeOff[]> {
+  const { data, error } = await db().from("time_off").select("*").gte("end_date", daysAgo(sinceDays)).order("start_date");
+  if (error) throw error;
+  return ((data ?? []) as TimeOffRow[]).map((t) => ({ start: t.start_date, end: t.end_date, reason: t.reason, id: t.id }));
+}
+
 export async function getBenchmarks(sinceDays: number): Promise<BenchmarkRow[]> {
   const { data, error } = await db().from("benchmarks").select("*").gte("date", daysAgo(sinceDays)).order("date", { ascending: false });
   if (error) throw error;
@@ -183,13 +189,59 @@ interface ThresholdEstimate {
   cs: { cs: number; dPrime: number } | null;
 }
 
-function estimate(athlete: AthleteRow, efforts: Record<string, number>, refDate: string): ThresholdEstimate {
+/** Distances of Strava's best-effort names, metres. */
+export const STRAVA_DISTANCES: Record<string, number> = {
+  "1K": 1000,
+  "1 mile": 1609.34,
+  "2 mile": 3218.69,
+  "5K": 5000,
+  "10K": 10000,
+  "15K": 15000,
+  "10 mile": 16093.4,
+  "20K": 20000,
+  "Half-Marathon": 21097.5,
+  Marathon: 42195,
+};
+/** Long enough to say something about threshold/endurance fitness. */
+const FITNESS_DISTANCES = ["5K", "10K", "15K", "10 mile", "Half-Marathon"];
+
+export interface StravaBest {
+  name: string;
+  seconds: number;
+  date: string;
+  activityId: string;
+}
+
+/** Fastest Strava best effort per distance among runs between two dates. */
+export function stravaBestsWithin(runs: ActivityRow[], fromDate: string, toDate: string): Record<string, StravaBest> {
+  const out: Record<string, StravaBest> = {};
+  for (const r of runs) {
+    const d = localDate(r.start_time);
+    if (d < fromDate || d > toDate || !r.strava_best_efforts || r.trainer) continue;
+    for (const [name, sec] of Object.entries(r.strava_best_efforts)) {
+      if (!(name in STRAVA_DISTANCES) || !sec) continue;
+      if (!out[name] || sec < out[name].seconds) out[name] = { name, seconds: sec, date: d, activityId: r.id };
+    }
+  }
+  return out;
+}
+
+function estimate(athlete: AthleteRow, efforts: Record<string, number>, refDate: string, stravaBests: Record<string, StravaBest> = {}): ThresholdEstimate {
   const candidates: { source: string; vdot: number }[] = [];
   const cs = criticalSpeed(efforts);
   if (cs) candidates.push({ source: "Critical speed (3–20 min best efforts)", vdot: round(vdotFromThresholdSpeed(thresholdFromCs(cs.cs)), 1) });
   for (const t of ["1200", "1800", "3600"]) {
     if (efforts[t]) candidates.push({ source: `Best ${Number(t) / 60}-min effort`, vdot: round(vdotFromPerformance(efforts[t], Number(t)), 1) });
   }
+  // Strava's best efforts are real performances inside your runs (e.g. a 5K in a parkrun or tempo).
+  for (const name of FITNESS_DISTANCES) {
+    const b = stravaBests[name];
+    if (b) candidates.push({ source: `Best ${name} on Strava (${b.date})`, vdot: round(vdotFromPerformance(STRAVA_DISTANCES[name], b.seconds), 1) });
+  }
+  // Garmin keeps showing your last measured threshold until it re-measures, so accept up to a year.
+  const ltAge = athlete.garmin_lt_date ? Date.parse(refDate) - Date.parse(athlete.garmin_lt_date) : NaN;
+  const garminLt = athlete.garmin_lt_speed && (isNaN(ltAge) || (ltAge >= -86400000 && ltAge < 365 * 86400000));
+  if (garminLt) candidates.push({ source: `Garmin lactate threshold (${athlete.garmin_lt_date ?? "latest"})`, vdot: round(vdotFromThresholdSpeed(athlete.garmin_lt_speed!), 1) });
   const raceAge = athlete.race_date ? Date.parse(refDate) - Date.parse(athlete.race_date) : NaN;
   if (athlete.race_distance_m && athlete.race_time_s && raceAge >= 0 && raceAge < 120 * 86400000) {
     candidates.push({ source: "Recent race result", vdot: round(vdotFromPerformance(athlete.race_distance_m, athlete.race_time_s), 1) });
@@ -199,26 +251,24 @@ function estimate(athlete: AthleteRow, efforts: Record<string, number>, refDate:
     const speed = 1000 / athlete.threshold_pace_override;
     return { vdot: round(vdotFromThresholdSpeed(speed), 1), thresholdSpeed: speed, source: "Manual threshold pace (Settings)", candidates, cs };
   }
-  // Garmin's lactate threshold (from the watch's guided test or auto-detection), if recent.
-  const ltAge = athlete.garmin_lt_date ? Date.parse(refDate) - Date.parse(athlete.garmin_lt_date) : NaN;
-  // Garmin keeps showing your last measured threshold until it re-measures, so accept up to a year.
-  if (athlete.garmin_lt_speed && (isNaN(ltAge) || (ltAge >= -86400000 && ltAge < 365 * 86400000))) {
-    const speed = athlete.garmin_lt_speed;
-    return { vdot: round(vdotFromThresholdSpeed(speed), 1), thresholdSpeed: speed, source: `Garmin lactate threshold (${athlete.garmin_lt_date})`, candidates, cs };
-  }
   if (!candidates.length) return { vdot: null, thresholdSpeed: null, source: "Not enough data yet", candidates, cs };
-  // A recent race is the most reliable; otherwise training efforts tend to underestimate, so take the best.
+  // A race you entered is the most reliable. Otherwise take the strongest evidence: training and
+  // illness only ever make you look slower than you are, never faster.
   const race = candidates.find((c) => c.source === "Recent race result");
   const chosen = race ?? candidates.reduce((a, b) => (b.vdot > a.vdot ? b : a));
-  const thresholdSpeed = cs && chosen.source.startsWith("Critical") ? thresholdFromCs(cs.cs) : null;
+  const thresholdSpeed = chosen.source.startsWith("Garmin")
+    ? athlete.garmin_lt_speed
+    : cs && chosen.source.startsWith("Critical")
+      ? thresholdFromCs(cs.cs)
+      : null;
   return { vdot: chosen.vdot, thresholdSpeed, source: chosen.source, candidates, cs };
 }
 
-/** Running VDOT as of a date, from the 90 days of runs before it. */
+/** Running VDOT as of a date, from the 120 days of runs before it. */
 // Trends (useOverride = false) use only your runs, so they stay comparable over time.
 function vdotAsOf(runs: ActivityRow[], athlete: AthleteRow, date: string, useOverride: boolean): number | null {
   const a = useOverride ? athlete : { ...athlete, threshold_pace_override: null, garmin_lt_speed: null };
-  return estimate(a, bestEffortsWithin(runs, shift(date, -89), date), date).vdot;
+  return estimate(a, bestEffortsWithin(runs, shift(date, -89), date), date, stravaBestsWithin(runs, shift(date, -119), date)).vdot;
 }
 
 function thresholdPaceFromVdot(vdot: number): number {
@@ -235,12 +285,19 @@ interface Everything {
   activities: ActivityRow[];
   benchmarks: BenchmarkRow[];
   checkins: CheckinRow[];
+  timeOff: TimeOff[];
 }
 
 async function loadEverything(): Promise<Everything> {
   await applyGarminLoadsIfNeeded();
-  const [athlete, activities, benchmarks, checkins] = await Promise.all([getAthlete(), getActivities(450), getBenchmarks(450), getCheckins(60)]);
-  return { athlete, activities, benchmarks, checkins };
+  const [athlete, activities, benchmarks, checkins, timeOff] = await Promise.all([
+    getAthlete(),
+    getActivities(450),
+    getBenchmarks(450),
+    getCheckins(60),
+    getTimeOff(200),
+  ]);
+  return { athlete, activities, benchmarks, checkins, timeOff };
 }
 
 function ergSessions(activities: ActivityRow[], sports: string[], machine: "ski" | "row"): ErgSession[] {
@@ -271,19 +328,62 @@ function hyroxSessions(e: Everything, runs: ActivityRow[]): HyroxSession[] {
     });
 }
 
+export interface HyroxResult {
+  id: string;
+  date: string;
+  name: string;
+  total: number;
+  hasSplits: boolean;
+  fromStrava: boolean;
+}
+
+const TRAINING_WORDS = /train|class|sim\b|session|practice|workout|prep|compromised/i;
+
+/**
+ * Your HYROX races: ones logged here, plus HYROX activities from Strava/Garmin
+ * ("HYROX Málaga", 45–150 min) that aren't obviously training sessions.
+ */
+function hyroxResults(e: Everything): HyroxResult[] {
+  const out: HyroxResult[] = [];
+  for (const a of e.activities) {
+    const date = localDate(a.start_time);
+    if (a.sport === "HYROX") {
+      const sp = a.details as unknown as HyroxSplits | null;
+      if (sp?.kind === "race") out.push({ id: a.id, date, name: a.name ?? "HYROX race", total: a.duration_s, hasSplits: true, fromStrava: false });
+      continue;
+    }
+    const looksLikeRace = a.focus === "race" || (/hyrox/i.test(a.name ?? "") && !TRAINING_WORDS.test(a.name ?? ""));
+    const dur = a.moving_s ?? a.duration_s;
+    if (looksLikeRace && dur >= 45 * 60 && dur <= 150 * 60 && a.focus !== "strength") {
+      out.push({ id: a.id, date, name: a.name ?? "HYROX", total: a.duration_s, hasSplits: false, fromStrava: a.source === "strava" });
+    }
+  }
+  // A Strava recording of a race you also logged with splits: keep the logged one.
+  return out
+    .filter((r) => r.hasSplits || !out.some((o) => o.hasSplits && o.date === r.date))
+    .sort((a, b) => (a.date < b.date ? 1 : -1));
+}
+
 function predictAt(e: Everything, runs: ActivityRow[], sims: HyroxSession[], date: string, useOverride: boolean): Prediction {
   const vdot = vdotAsOf(runs, e.athlete, date, useOverride);
   // Today's prediction uses Garmin's own 10K prediction when synced; trends use your runs only.
+  // The faster of the two: both are evidence of what you can run, neither overstates it much.
   const garmin10k = useOverride && !e.athlete.threshold_pace_override ? e.athlete.garmin_pred_10k : null;
+  const own10k = vdot ? predictTime(vdot, 10000) : null;
+  const useGarmin = !!garmin10k && (!own10k || garmin10k < own10k);
+  const tenK = useGarmin ? garmin10k : own10k;
   return predictHyrox({
     division: e.athlete.hyrox_division as Division,
     asOf: date,
-    tenKPace: garmin10k ? garmin10k / 10 : vdot ? predictTime(vdot, 10000) / 10 : null,
-    tenKSource: garmin10k ? "Garmin 10K prediction" : "10K pace from your runs",
+    tenKPace: tenK ? tenK / 10 : null,
+    tenKSource: useGarmin ? "Garmin 10K prediction" : "10K pace from your running fitness",
     skiSessions: ergSessions(e.activities, ["SkiErg"], "ski"),
     rowSessions: ergSessions(e.activities, ROW_SPORTS, "row"),
     benchmarks: allBenchmarks(e),
     hyroxSessions: sims,
+    raceTotals: hyroxResults(e)
+      .filter((r) => !r.hasSplits)
+      .map((r) => ({ date: r.date, total: r.total, label: r.fromStrava ? "race on Strava" : "race" })),
   });
 }
 
@@ -370,6 +470,7 @@ export async function dashboardData() {
     sessions,
     daysToGoal: goal?.daysTo ?? null,
     thresholdPace: vdot ? formatPace(thresholdPaceFromVdot(vdot)) : null,
+    timeOff: e.timeOff,
     weakStations: opportunities(prediction, 4).filter((o) => o.key !== "runs" && o.key !== "roxzone").map((o) => o.name.replace(/ \d.*$/, "")),
   });
 
@@ -395,6 +496,7 @@ export async function dashboardData() {
     cues,
     plan,
     prediction,
+    hyroxPb: hyroxResults(e).reduce<HyroxResult | null>((a, r) => (!a || r.total < a.total ? r : a), null),
     pmc: series.slice(-90),
     zones: zones.map((s) => Math.round(s / 60)),
     weekly: [...weeks.entries()].map(([week, v]) => ({ week: week.slice(5), ...Object.fromEntries(Object.entries(v).map(([k, x]) => [k, Math.round(x)])) })),
@@ -420,7 +522,11 @@ export async function hyroxData() {
     trend.push({ date: d.slice(5), total: Math.round(p.total), confidence: p.confidence });
   }
   const sessions = e.activities.filter((a) => a.sport === "HYROX");
+  const results = hyroxResults(e);
+  const pb = results.reduce<HyroxResult | null>((a, r) => (!a || r.total < a.total ? r : a), null);
   return {
+    results,
+    pb,
     athlete: e.athlete,
     prediction,
     opportunities: opportunities(prediction, 3),
@@ -512,20 +618,28 @@ export async function progressData() {
     return { key: st.key, name: st.name, history: list, first: list[0] ?? null, latest: list[list.length - 1] ?? null };
   }).filter((s) => s.history.length > 0);
 
-  // Overall verdict from the key metrics' 6-week change.
-  const changes = metrics.filter((m) => ["hyrox", "threshold", "ctl", "ef", "ski", "row"].includes(m.key) && m.change6w !== null);
+  // Overall verdict from the key metrics' 6-week change. A recent illness/injury/holiday drops
+  // training volume (CTL) and pushes easy-run HR up, so those don't count against you then.
+  const recentOff = e.timeOff.filter((t) => t.end >= daysAgo(42) && t.start <= today());
+  const volumeKeys = recentOff.length ? [] : ["ctl", "ef"];
+  const changes = metrics.filter((m) => ["hyrox", "threshold", "ski", "row", ...volumeKeys].includes(m.key) && m.change6w !== null);
   const better = changes.filter((m) => m.change6w! > 1).length;
   const worse = changes.filter((m) => m.change6w! < -1).length;
+  const offNote = recentOff.length
+    ? ` Time off ${recentOff.map((t) => `${t.start.slice(5)}–${t.end.slice(5)}`).join(", ")} is accounted for: training volume and easy-run heart rate aren't counted.`
+    : "";
   const verdict =
     changes.length === 0
       ? { label: "Not enough data yet", tone: "muted" as const, text: "Sync a few weeks of training and log some SkiErg/Row sessions and station benchmarks." }
       : better > worse
-        ? { label: "Yes — you're getting fitter", tone: "good" as const, text: `${better} of ${changes.length} key markers improved over the last 6 weeks.` }
+        ? { label: "Yes — you're getting fitter", tone: "good" as const, text: `${better} of ${changes.length} key markers improved over the last 6 weeks.${offNote}` }
         : worse > better
-          ? { label: "Fitness is slipping", tone: "bad" as const, text: `${worse} of ${changes.length} key markers got worse over the last 6 weeks. Check consistency and recovery.` }
-          : { label: "Holding steady", tone: "warn" as const, text: "Your markers are broadly flat over the last 6 weeks. To progress, add load gradually (see Today)." };
+          ? recentOff.length
+            ? { label: "Dip after time off", tone: "warn" as const, text: `${worse} of ${changes.length} markers are lower than 6 weeks ago, which is normal straight after a break and usually recovers within 1–2 weeks.${offNote}` }
+            : { label: "Fitness is slipping", tone: "bad" as const, text: `${worse} of ${changes.length} key markers got worse over the last 6 weeks. Check consistency and recovery.` }
+          : { label: "Holding steady", tone: "warn" as const, text: `Your markers are broadly flat over the last 6 weeks.${offNote || " To progress, add load gradually (see Today)."}` };
 
-  return { metrics, stations, verdict };
+  return { metrics, stations, verdict, timeOff: recentOff };
 }
 
 // ---------------------------------------------------------------------------
@@ -537,7 +651,12 @@ export async function runningData() {
   const runs = activities.filter((a) => isRun(a.sport));
 
   const efforts = bestEffortsWithin(runs, daysAgo(89), today());
-  const est = estimate(athlete, efforts, today());
+  const est = estimate(athlete, efforts, today(), stravaBestsWithin(runs, daysAgo(119), today()));
+
+  // Your actual times, from Strava's best efforts: best of the imported year, and of the last 90 days.
+  const yearBests = stravaBestsWithin(runs, "0000-01-01", today());
+  const recentBests = stravaBestsWithin(runs, daysAgo(89), today());
+  const STRAVA_NAME: Record<string, string> = { "5K": "5K", "10K": "10K", "Half marathon": "Half-Marathon", Marathon: "Marathon" };
   const thresholdPace = est.thresholdSpeed ? 1000 / est.thresholdSpeed : est.vdot ? thresholdPaceFromVdot(est.vdot) : null;
 
   // Threshold trend: 90-day rolling estimate, sampled every 2 weeks over the last year.
@@ -574,7 +693,14 @@ export async function runningData() {
     estimate: est,
     thresholdPace,
     paces: est.vdot ? trainingPaces(est.vdot) : [],
-    predictions: est.vdot ? RACES.map((r) => ({ ...r, time: predictTime(est.vdot!, r.m) })) : [],
+    predictions: RACES.map((r) => ({
+      ...r,
+      time: est.vdot ? predictTime(est.vdot, r.m) : null,
+      best: yearBests[STRAVA_NAME[r.name]] ?? null,
+      recent: recentBests[STRAVA_NAME[r.name]] ?? null,
+    })),
+    shortBests: ["1K", "1 mile"].map((n) => ({ name: n, best: yearBests[n] ?? null, recent: recentBests[n] ?? null })).filter((x) => x.best),
+    hasStravaBests: Object.keys(yearBests).length > 0,
     efforts: EFFORT_DURATIONS.filter((d) => efforts[String(d)]).map((d) => ({
       duration: d,
       distance: efforts[String(d)],
@@ -738,7 +864,7 @@ export async function calendarData(weekParam?: string) {
 
   const from = gridStart < monday ? gridStart : monday;
   const to = gridEnd > sunday ? gridEnd : sunday;
-  const [{ data, error }, checkins, templates] = await Promise.all([
+  const [{ data, error }, checkins, templates, timeOff] = await Promise.all([
     db()
       .from("activities")
       .select("*")
@@ -747,6 +873,7 @@ export async function calendarData(weekParam?: string) {
       .order("start_time"),
     db().from("checkins").select("*").gte("date", monday).lte("date", sunday),
     getTemplates(),
+    getTimeOff(400),
   ]);
   if (error) throw error;
   const acts = (data as ActivityRow[]).map((a) => ({ a, date: localDate(a.start_time) })).filter((x) => x.date >= from && x.date <= to);
@@ -758,6 +885,7 @@ export async function calendarData(weekParam?: string) {
       date,
       sessions: acts.filter((x) => x.date === date).map((x) => toCalendarSession(x.a, templates)),
       checkin: c ? { hrv: c.hrv_ms, sleep: c.sleep_score, bodyBattery: c.body_battery } : null,
+      off: timeOff.find((t) => t.start <= date && t.end >= date) ?? null,
     };
   });
 
@@ -769,7 +897,7 @@ export async function calendarData(weekParam?: string) {
     byCategory[c] = (byCategory[c] ?? 0) + (a.moving_s ?? a.duration_s);
   }
 
-  const month: { date: string; inMonth: boolean; categories: string[]; load: number }[][] = [];
+  const month: { date: string; inMonth: boolean; categories: string[]; load: number; off: boolean }[][] = [];
   for (let d = gridStart; d <= gridEnd; d = shift(d, 7)) {
     month.push(
       Array.from({ length: 7 }, (_, i) => {
@@ -780,6 +908,7 @@ export async function calendarData(weekParam?: string) {
           inMonth: date >= monthStart && date <= monthEnd,
           categories: list.map((x) => categorize(x.a.sport, x.a.name, x.a.focus, x.a.entries, x.a.garmin_type)),
           load: Math.round(list.reduce((s, x) => s + (x.a.load ?? 0), 0)),
+          off: timeOff.some((t) => t.start <= date && t.end >= date),
         };
       }),
     );
