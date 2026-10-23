@@ -210,7 +210,7 @@ export async function deleteBenchmark(id: string) {
 
 export async function setRpe(id: string, rpe: number) {
   const athlete = await getAthlete();
-  const { data } = await db().from("activities").select("duration_s, moving_s, avg_hr, suffer_score, garmin_load").eq("id", id).single();
+  const { data } = await db().from("activities").select("*").eq("id", id).maybeSingle();
   if (!data) return;
   const { load, method } = sessionLoad(
     { duration_s: data.moving_s || data.duration_s, avg_hr: data.avg_hr, rpe, suffer_score: data.suffer_score, garmin_load: data.garmin_load, garmin_scale: athlete.garmin_load_scale },
@@ -272,8 +272,10 @@ export async function saveSession(form: FormData) {
 
   let startTime: string;
   if (id) {
-    const { data: a } = await db().from("activities").select("start_time, duration_s, moving_s, avg_hr, suffer_score, garmin_load, name").eq("id", id).single();
-    if (!a) throw new Error("Session not found");
+    // select("*") so a column missing from an older database doesn't make the whole read fail.
+    const { data: a, error: readErr } = await db().from("activities").select("*").eq("id", id).maybeSingle();
+    if (readErr) throw new Error(`Couldn't read the session: ${readErr.message}`);
+    if (!a) throw new Error("Session not found — it may have been deleted");
     fields.name ??= a.name;
     const { load, method } = sessionLoad(
       {
@@ -287,7 +289,7 @@ export async function saveSession(form: FormData) {
       athlete,
     );
     const { error } = await db().from("activities").update({ ...fields, load, load_method: method }).eq("id", id);
-    if (error) throw error;
+    if (error) throw new Error(`Couldn't save the session: ${error.message}. If it mentions a missing column, run supabase/schema.sql again in the Supabase SQL Editor.`);
     startTime = a.start_time;
   } else {
     const durationS = duration(form, "duration");
