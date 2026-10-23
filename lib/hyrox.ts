@@ -1,15 +1,49 @@
 // HYROX race model: 8 × (1 km run + station) + Roxzone transitions.
 // Pure functions only — data loading lives in lib/data.ts.
 
-export type Division = "open_men" | "open_women" | "pro_men" | "pro_women";
+/** Singles divisions: one athlete does everything (also the weights doubles races use). */
+export type SinglesDivision = "open_men" | "open_women" | "pro_men" | "pro_women";
+/** Doubles: both partners run all 8 km together and share the station work. */
+export type DoublesDivision = "doubles_men" | "doubles_women" | "doubles_mixed" | "pro_doubles_men" | "pro_doubles_women";
+export type Division = SinglesDivision | DoublesDivision;
 export type StationKey = "ski" | "sled_push" | "sled_pull" | "bbj" | "row" | "farmers" | "lunges" | "wall_balls";
 
-export const DIVISIONS: Record<Division, string> = {
+export const SINGLES_DIVISIONS: Record<SinglesDivision, string> = {
   open_men: "Open Men",
   open_women: "Open Women",
   pro_men: "Pro Men",
   pro_women: "Pro Women",
 };
+
+export const DIVISIONS: Record<Division, string> = {
+  ...SINGLES_DIVISIONS,
+  doubles_men: "Doubles Men",
+  doubles_women: "Doubles Women",
+  doubles_mixed: "Doubles Mixed",
+  pro_doubles_men: "Pro Doubles Men",
+  pro_doubles_women: "Pro Doubles Women",
+};
+
+export function isDoubles(d: Division): d is DoublesDivision {
+  return d.includes("doubles");
+}
+
+/** The singles division whose weights a division uses. */
+export function weightsOf(d: Division): SinglesDivision {
+  switch (d) {
+    case "doubles_men":
+    case "doubles_mixed":
+      return "open_men";
+    case "doubles_women":
+      return "open_women";
+    case "pro_doubles_men":
+      return "pro_men";
+    case "pro_doubles_women":
+      return "pro_women";
+    default:
+      return d;
+  }
+}
 
 export interface Station {
   key: StationKey;
@@ -17,8 +51,8 @@ export interface Station {
   /** Race distance in metres, or reps for wall balls. */
   amount: number;
   unit: "m" | "reps";
-  /** Race load per division, kg (sled = total incl. sled, farmers = per hand). */
-  load: Record<Division, number | null>;
+  /** Race load per singles division, kg (sled = total incl. sled, farmers = per hand). */
+  load: Record<SinglesDivision, number | null>;
   /** How time scales with load: time ∝ (raceLoad / benchmarkLoad)^loadExp. */
   loadExp: number;
 }
@@ -47,7 +81,7 @@ export interface Reference {
  * "fast" ≈ top ~15% of the division. Rough guides compiled from public race results —
  * your own benchmarks always replace these.
  */
-export const REFERENCE: Record<Division, { average: Reference; fast: Reference }> = {
+export const REFERENCE: Record<SinglesDivision, { average: Reference; fast: Reference }> = {
   open_men: {
     average: { run: 330, roxzone: 450, stations: { ski: 285, sled_push: 210, sled_pull: 300, bbj: 300, row: 290, farmers: 120, lunges: 285, wall_balls: 360 } },
     fast: { run: 255, roxzone: 300, stations: { ski: 245, sled_push: 150, sled_pull: 210, bbj: 210, row: 250, farmers: 90, lunges: 210, wall_balls: 255 } },
@@ -65,6 +99,22 @@ export const REFERENCE: Record<Division, { average: Reference; fast: Reference }
     fast: { run: 265, roxzone: 300, stations: { ski: 260, sled_push: 190, sled_pull: 250, bbj: 225, row: 265, farmers: 95, lunges: 245, wall_balls: 290 } },
   },
 };
+
+/**
+ * Reference splits for any division. Doubles are derived from singles: partners share the
+ * station work (roughly 60% of the singles time) but both run the full 8 km. Very rough —
+ * your own doubles splits replace them.
+ */
+export function reference(d: Division): { average: Reference; fast: Reference } {
+  const base = REFERENCE[weightsOf(d)];
+  if (!isDoubles(d)) return base;
+  const scale = (r: Reference): Reference => ({
+    run: Math.round(r.run * 0.98),
+    roxzone: Math.round(r.roxzone * 0.85),
+    stations: Object.fromEntries(Object.entries(r.stations).map(([k, v]) => [k, Math.round(v * 0.6)])) as Record<StationKey, number>,
+  });
+  return { average: scale(base.average), fast: scale(base.fast) };
+}
 
 /** Race-day slowdown applied to fresh training efforts (you arrive at each station tired). */
 export const FRESH_TO_RACE = { erg: 1.06, station: 1.1 };
@@ -97,6 +147,8 @@ export interface HyroxSplits {
   runs: (number | null)[];
   stations: Partial<Record<StationKey, number | null>>;
   roxzone_s: number | null;
+  /** Division raced; absent on older logs (= your main division in Settings). */
+  division?: Division;
 }
 
 export interface HyroxSession {
@@ -136,7 +188,7 @@ export function benchmarkToRace(b: Benchmark, division: Division): number {
   const st = STATION_BY_KEY[b.station];
   let t = b.time_s;
   if (b.amount && b.amount > 0 && b.amount !== st.amount) t *= Math.pow(st.amount / b.amount, 1.06);
-  const raceLoad = st.load[division];
+  const raceLoad = st.load[weightsOf(division)];
   if (raceLoad && b.load_kg && b.load_kg > 0 && st.loadExp) t *= Math.pow(raceLoad / b.load_kg, st.loadExp);
   return t * (b.fresh ? FRESH_TO_RACE.station : 1);
 }
@@ -217,7 +269,7 @@ export function predictHyrox(input: PredictionInput): Prediction {
   const window = input.windowDays ?? 120;
   const fallback = input.fallbackDays ?? 548;
   const inWindow = (d: string) => d <= asOf && daysBetween(d, asOf) <= window;
-  const ref = REFERENCE[division];
+  const ref = reference(division);
   const byNewest = (a: HyroxSession, b: HyroxSession) => (a.date < b.date ? 1 : -1);
   const sims = input.hyroxSessions.filter((s) => inWindow(s.date)).sort(byNewest);
   // Races/sims older than the window: used only where nothing recent exists (e.g. a race 6 months ago).

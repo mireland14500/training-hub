@@ -1,7 +1,7 @@
 import { saveBenchmark } from "@/app/actions";
 import { getAthlete } from "@/lib/db";
 import { today } from "@/lib/data";
-import { DIVISIONS, STATIONS, type Division } from "@/lib/hyrox";
+import { DIVISIONS, STATIONS, weightsOf, type Division } from "@/lib/hyrox";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +33,7 @@ export default async function StationBenchmark({ searchParams }: { searchParams:
             {STATIONS.map((s) => (
               <option key={s.key} value={s.key}>
                 {s.name}
-                {s.load[division] ? ` (race: ${s.load[division]} kg)` : ""}
+                {s.load[weightsOf(division)] ? ` (race: ${s.load[weightsOf(division)]} kg)` : ""}
               </option>
             ))}
           </select>

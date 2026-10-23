@@ -142,6 +142,7 @@ export async function saveErgSession(form: FormData) {
 
 const STATION_KEYS = ["ski", "sled_push", "sled_pull", "bbj", "row", "farmers", "lunges", "wall_balls"];
 const HYROX_KINDS = ["race", "full_sim", "half_sim", "custom"];
+const HYROX_DIVISIONS = ["open_men", "open_women", "pro_men", "pro_women", "doubles_men", "doubles_women", "doubles_mixed", "pro_doubles_men", "pro_doubles_women"];
 
 export async function saveHyroxSession(form: FormData) {
   const athlete = await getAthlete();
@@ -174,7 +175,7 @@ export async function saveHyroxSession(form: FormData) {
       load,
       load_method: method,
       zone_seconds: hr.zone_seconds,
-      details: { kind, runs, stations, roxzone_s: roxzone },
+      details: { kind, runs, stations, roxzone_s: roxzone, division: HYROX_DIVISIONS.includes(String(form.get("division"))) ? String(form.get("division")) : athlete.hyrox_division },
       photo_path: str(form, "photo_path"),
       notes: str(form, "notes"),
     },
@@ -360,4 +361,14 @@ export async function deleteTimeOff(form: FormData) {
   if (id) await db().from("time_off").delete().eq("id", id);
   revalidatePath("/", "layout");
   redirect(`/calendar${str(form, "week") ? `?week=${str(form, "week")}` : ""}`);
+}
+
+/** Answers "is this Strava activity a HYROX race?" from the HYROX page. */
+export async function confirmRace(form: FormData) {
+  const id = str(form, "id");
+  if (!id) return;
+  const isRace = form.get("answer") === "race";
+  await db().from("activities").update({ focus: isRace ? "race" : "hyrox" }).eq("id", id);
+  revalidatePath("/", "layout");
+  redirect("/hyrox");
 }

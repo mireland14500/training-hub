@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { benchmarkToRace, bestErg1k, erg1kEquivalent, opportunities, predictHyrox, REFERENCE, type PredictionInput } from "@/lib/hyrox";
+import { benchmarkToRace, bestErg1k, erg1kEquivalent, opportunities, predictHyrox, reference, REFERENCE, type PredictionInput } from "@/lib/hyrox";
 
 const base: PredictionInput = {
   division: "open_men",
@@ -111,5 +111,19 @@ describe("prediction", () => {
   it("ranks the biggest time losses first", () => {
     const p = predictHyrox({ ...base, benchmarks: [{ date: "2026-09-01", station: "wall_balls", time_s: 900, amount: null, load_kg: null, fresh: false }] });
     expect(opportunities(p, 1)[0].key).toBe("wall_balls");
+  });
+});
+
+describe("divisions", () => {
+  it("derives doubles reference times from the matching singles weights", () => {
+    const pro = REFERENCE.pro_men.average;
+    const dbl = reference("pro_doubles_men").average;
+    expect(dbl.stations.sled_push).toBe(Math.round(pro.stations.sled_push * 0.6));
+    expect(dbl.run).toBe(Math.round(pro.run * 0.98));
+    expect(reference("open_men")).toBe(REFERENCE.open_men);
+  });
+  it("scales benchmarks to the weights a doubles division uses", () => {
+    const b = { date: "2026-09-01", station: "sled_push" as const, time_s: 100, amount: null, load_kg: 152, fresh: false };
+    expect(benchmarkToRace(b, "pro_doubles_men")).toBeCloseTo(100 * (202 / 152), 5);
   });
 });

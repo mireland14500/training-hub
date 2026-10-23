@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { saveHyroxSession } from "@/app/actions";
+import { DIVISIONS } from "@/lib/hyrox";
 import type { LinkCandidate } from "./ErgForm";
 import { fmtTime, localInputValue, readPhoto } from "./photo";
 
@@ -38,7 +39,7 @@ function parse(v: string): number | null {
   return parts.reduce((a, p) => a * 60 + p, 0);
 }
 
-export default function HyroxForm({ candidates }: { candidates: LinkCandidate[] }) {
+export default function HyroxForm({ candidates, defaultDivision }: { candidates: LinkCandidate[]; defaultDivision: string }) {
   const [kind, setKind] = useState("full_sim");
   const [vals, setVals] = useState<Record<string, string>>({});
   const [start, setStart] = useState(localInputValue(new Date()));
@@ -88,6 +89,14 @@ export default function HyroxForm({ candidates }: { candidates: LinkCandidate[] 
             </button>
           ))}
         </div>
+        <label className="block">
+          <span className="label">Category</span>
+          <select name="division" className="input mt-1" defaultValue={defaultDivision}>
+            {Object.entries(DIVISIONS).map(([k, v]) => (
+              <option key={k} value={k}>{v}</option>
+            ))}
+          </select>
+        </label>
         <label className="btn-ghost w-full cursor-pointer">
           📷 {busy ? "Reading splits…" : "Fill from a results screenshot or photo"}
           <input type="file" accept="image/*" className="sr-only" onChange={onPhoto} disabled={busy} />

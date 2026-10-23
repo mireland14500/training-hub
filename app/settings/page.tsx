@@ -2,7 +2,7 @@ import { reanalyseRuns, saveSettings, applyGarminThresholdHr } from "@/app/actio
 import SyncButton from "@/components/SyncButton";
 import { formatDuration, formatPace } from "@/lib/analysis";
 import { db, getAthlete } from "@/lib/db";
-import { DIVISIONS } from "@/lib/hyrox";
+import { SINGLES_DIVISIONS } from "@/lib/hyrox";
 
 export const dynamic = "force-dynamic";
 
@@ -115,11 +115,11 @@ export default async function Settings({ searchParams }: { searchParams: Promise
           <label className="block">
             <span className="label">Division</span>
             <select name="hyrox_division" defaultValue={a.hyrox_division} className="input mt-1">
-              {Object.entries(DIVISIONS).map(([k, v]) => (
+              {Object.entries(SINGLES_DIVISIONS).map(([k, v]) => (
                 <option key={k} value={k}>{v}</option>
               ))}
             </select>
-            <span className="mt-0.5 block text-xs text-muted">Sets race weights (for scaling benchmarks) and the reference times you&apos;re compared against.</span>
+            <span className="mt-0.5 block text-xs text-muted">Your main singles division: sets race weights for scaling benchmarks. Doubles races you log get their own prediction on the HYROX page.</span>
           </label>
           <div className="grid grid-cols-2 gap-3">
             <Num name="goal_name" label="Next race" value={a.goal_name} hint="e.g. HYROX London" />

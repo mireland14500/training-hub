@@ -3,7 +3,8 @@ import { HyroxTrendChart } from "@/components/Charts";
 import { BenchmarkDelete } from "@/components/ActivityControls";
 import { formatDuration } from "@/lib/analysis";
 import { hyroxData, localDate } from "@/lib/data";
-import { DIVISIONS, REFERENCE, STATION_BY_KEY, type Division, type Source } from "@/lib/hyrox";
+import { confirmRace } from "@/app/actions";
+import { DIVISIONS, isDoubles, reference, STATION_BY_KEY, type Source } from "@/lib/hyrox";
 
 export const dynamic = "force-dynamic";
 
@@ -15,11 +16,11 @@ const SOURCE_STYLE: Record<Source, { label: string; color: string }> = {
   reference: { label: "Typical — no data", color: "var(--warn)" },
 };
 
-export default async function Hyrox() {
-  const d = await hyroxData();
+export default async function Hyrox({ searchParams }: { searchParams: Promise<{ division?: string }> }) {
+  const { division } = await searchParams;
+  const d = await hyroxData(division);
   const p = d.prediction;
-  const division = d.athlete.hyrox_division as Division;
-  const ref = REFERENCE[division];
+  const ref = reference(d.division);
   const refTotal = (r: typeof ref.average) => r.run * 8 + r.roxzone + Object.values(r.stations).reduce((a, b) => a + b, 0);
 
   return (
@@ -27,13 +28,54 @@ export default async function Hyrox() {
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold">HYROX</h1>
-          <p className="text-sm text-muted">{DIVISIONS[division]} · <Link href="/settings" className="text-accent">change</Link></p>
+          <p className="text-sm text-muted">{DIVISIONS[d.division]}{isDoubles(d.division) ? " · predicted from your doubles races" : ""}</p>
         </div>
         <div className="flex gap-2">
           <Link href="/log/station" className="btn-ghost text-sm">+ Benchmark</Link>
           <Link href="/log/hyrox" className="btn-primary text-sm">+ Sim/race</Link>
         </div>
       </div>
+
+      {d.categories.length > 1 && (
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+          {d.categories.map((c) => (
+            <Link
+              key={c.division}
+              href={`/hyrox?division=${c.division}`}
+              className={`card block p-3 transition hover:border-accent ${c.division === d.division ? "border-accent" : ""}`}
+            >
+              <div className="text-xs font-semibold text-muted">{c.label}</div>
+              <div className="tabular mt-1 text-sm">
+                Predicted <b>{formatDuration(c.prediction)}</b>
+              </div>
+              <div className="tabular text-sm">
+                Best <b className="text-good">{c.best ? formatDuration(c.best.total) : "–"}</b>
+              </div>
+            </Link>
+          ))}
+        </div>
+      )}
+
+      {d.possibleRaces.length > 0 && (
+        <div className="card space-y-2">
+          <div className="label">Were these HYROX races?</div>
+          <p className="text-xs text-muted">Found on Strava by name. Only confirmed races count towards your best time and prediction.</p>
+          <ul className="divide-y divide-border">
+            {d.possibleRaces.map((r) => (
+              <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+                <span>
+                  {r.date} · {r.name} · <span className="tabular">{formatDuration(r.total)}</span>
+                </span>
+                <form action={confirmRace} className="flex gap-2">
+                  <input type="hidden" name="id" value={r.id} />
+                  <button name="answer" value="race" className="btn-ghost px-3 py-1 text-xs">Race</button>
+                  <button name="answer" value="training" className="btn-ghost px-3 py-1 text-xs">Training</button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="grid gap-4 md:grid-cols-[1fr_1.5fr]">
         <div className="card">
@@ -164,7 +206,7 @@ export default async function Hyrox() {
                 <div className="min-w-0">
                   <Link href={`/session/${r.id}`} className="block truncate hover:text-accent">{r.date} · {r.name}</Link>
                   <div className="text-xs text-muted">
-                    {r.hasSplits ? "Splits logged" : <>From Strava — <Link href="/log/hyrox" className="text-accent">add splits</Link> for a sharper prediction</>}
+                    {DIVISIONS[r.division]} · {r.hasSplits ? "splits logged" : <>no splits — <Link href="/log/hyrox" className="text-accent">add them</Link> for a sharper prediction</>}
                   </div>
                 </div>
                 <span className={`tabular shrink-0 font-semibold ${d.pb?.id === r.id ? "text-good" : ""}`}>{formatDuration(r.total)}</span>

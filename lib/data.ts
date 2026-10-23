@@ -22,6 +22,8 @@ import {
   bestErg1k,
   opportunities,
   predictHyrox,
+  DIVISIONS,
+  isDoubles,
   STATION_BY_KEY,
   STATIONS,
   benchmarkToRace,
@@ -335,36 +337,49 @@ export interface HyroxResult {
   total: number;
   hasSplits: boolean;
   fromStrava: boolean;
+  division: Division;
 }
 
-const TRAINING_WORDS = /train|class|sim\b|session|practice|workout|prep|compromised/i;
-
 /**
- * Your HYROX races: ones logged here, plus HYROX activities from Strava/Garmin
- * ("HYROX Málaga", 45–150 min) that aren't obviously training sessions.
+ * Your HYROX races: ones logged here with splits, plus Strava activities you've confirmed
+ * as a race (session type "Race"). Splits-less Strava recordings of a logged race are dropped.
  */
 function hyroxResults(e: Everything): HyroxResult[] {
+  const main = e.athlete.hyrox_division as Division;
   const out: HyroxResult[] = [];
   for (const a of e.activities) {
     const date = localDate(a.start_time);
     if (a.sport === "HYROX") {
       const sp = a.details as unknown as HyroxSplits | null;
-      if (sp?.kind === "race") out.push({ id: a.id, date, name: a.name ?? "HYROX race", total: a.duration_s, hasSplits: true, fromStrava: false });
-      continue;
-    }
-    const looksLikeRace = a.focus === "race" || (/hyrox/i.test(a.name ?? "") && !TRAINING_WORDS.test(a.name ?? ""));
-    const dur = a.moving_s ?? a.duration_s;
-    if (looksLikeRace && dur >= 45 * 60 && dur <= 150 * 60 && a.focus !== "strength") {
-      out.push({ id: a.id, date, name: a.name ?? "HYROX", total: a.duration_s, hasSplits: false, fromStrava: a.source === "strava" });
+      if (sp?.kind === "race") out.push({ id: a.id, date, name: a.name ?? "HYROX race", total: a.duration_s, hasSplits: true, fromStrava: false, division: sp.division ?? main });
+    } else if (a.focus === "race" && !a.excluded) {
+      out.push({ id: a.id, date, name: a.name ?? "HYROX", total: a.duration_s, hasSplits: false, fromStrava: a.source === "strava", division: main });
     }
   }
-  // A Strava recording of a race you also logged with splits: keep the logged one.
   return out
-    .filter((r) => r.hasSplits || !out.some((o) => o.hasSplits && o.date === r.date))
+    .filter((r) => r.hasSplits || !out.some((o) => o.hasSplits && Math.abs(Date.parse(o.date) - Date.parse(r.date)) <= 86400000))
     .sort((a, b) => (a.date < b.date ? 1 : -1));
 }
 
-function predictAt(e: Everything, runs: ActivityRow[], sims: HyroxSession[], date: string, useOverride: boolean): Prediction {
+/**
+ * Strava activities named like HYROX that might be races (45–150 min) but aren't confirmed
+ * either way — shown on the HYROX page with "race / not a race" buttons.
+ */
+function possibleRaces(e: Everything, results: HyroxResult[]) {
+  return e.activities
+    .filter((a) => a.sport !== "HYROX" && !a.focus && !a.excluded && /hyrox|doubles|relay/i.test(a.name ?? ""))
+    .filter((a) => {
+      const dur = a.moving_s ?? a.duration_s;
+      return dur >= 45 * 60 && dur <= 150 * 60;
+    })
+    .filter((a) => !results.some((r) => Math.abs(Date.parse(r.date) - Date.parse(localDate(a.start_time))) <= 86400000))
+    .map((a) => ({ id: a.id, date: localDate(a.start_time), name: a.name ?? "HYROX", total: a.duration_s }))
+    .slice(0, 10);
+}
+
+function predictAt(e: Everything, runs: ActivityRow[], sims: HyroxSession[], date: string, useOverride: boolean, division?: Division): Prediction {
+  const main = e.athlete.hyrox_division as Division;
+  const div = division ?? main;
   const vdot = vdotAsOf(runs, e.athlete, date, useOverride);
   // Today's prediction uses Garmin's own 10K prediction when synced; trends use your runs only.
   // The faster of the two: both are evidence of what you can run, neither overstates it much.
@@ -372,19 +387,26 @@ function predictAt(e: Everything, runs: ActivityRow[], sims: HyroxSession[], dat
   const own10k = vdot ? predictTime(vdot, 10000) : null;
   const useGarmin = !!garmin10k && (!own10k || garmin10k < own10k);
   const tenK = useGarmin ? garmin10k : own10k;
+  // Each category is predicted from its own races; solo training data only applies to singles.
+  const doubles = isDoubles(div);
   return predictHyrox({
-    division: e.athlete.hyrox_division as Division,
+    division: div,
     asOf: date,
     tenKPace: tenK ? tenK / 10 : null,
     tenKSource: useGarmin ? "Garmin 10K prediction" : "10K pace from your running fitness",
-    skiSessions: ergSessions(e.activities, ["SkiErg"], "ski"),
-    rowSessions: ergSessions(e.activities, ROW_SPORTS, "row"),
-    benchmarks: allBenchmarks(e),
-    hyroxSessions: sims,
+    skiSessions: doubles ? [] : ergSessions(e.activities, ["SkiErg"], "ski"),
+    rowSessions: doubles ? [] : ergSessions(e.activities, ROW_SPORTS, "row"),
+    benchmarks: doubles ? [] : allBenchmarks(e),
+    hyroxSessions: sims.filter((s) => (s.splits.division ?? main) === div),
     raceTotals: hyroxResults(e)
-      .filter((r) => !r.hasSplits)
+      .filter((r) => !r.hasSplits && r.division === div)
       .map((r) => ({ date: r.date, total: r.total, label: r.fromStrava ? "race on Strava" : "race" })),
   });
+}
+
+/** Fastest result in a division. */
+function bestIn(results: HyroxResult[], division: Division): HyroxResult | null {
+  return results.filter((r) => r.division === division).reduce<HyroxResult | null>((a, r) => (!a || r.total < a.total ? r : a), null);
 }
 
 function dailyLoads(activities: ActivityRow[]): Map<string, number> {
@@ -496,7 +518,7 @@ export async function dashboardData() {
     cues,
     plan,
     prediction,
-    hyroxPb: hyroxResults(e).reduce<HyroxResult | null>((a, r) => (!a || r.total < a.total ? r : a), null),
+    hyroxPb: bestIn(hyroxResults(e), e.athlete.hyrox_division as Division),
     pmc: series.slice(-90),
     zones: zones.map((s) => Math.round(s / 60)),
     weekly: [...weeks.entries()].map(([week, v]) => ({ week: week.slice(5), ...Object.fromEntries(Object.entries(v).map(([k, x]) => [k, Math.round(x)])) })),
@@ -510,23 +532,32 @@ export async function dashboardData() {
 // HYROX page
 // ---------------------------------------------------------------------------
 
-export async function hyroxData() {
+export async function hyroxData(divisionParam?: string) {
   const e = await loadEverything();
   const runs = e.activities.filter((a) => isRun(a.sport));
   const sims = hyroxSessions(e, runs);
-  const prediction = predictAt(e, runs, sims, today(), true);
+  const results = hyroxResults(e);
+  const main = e.athlete.hyrox_division as Division;
+
+  // A prediction for every category you've raced, plus your main division.
+  const raced = [...new Set<Division>([main, ...results.map((r) => r.division), ...sims.map((s) => s.splits.division ?? main)])];
+  const division = raced.includes(divisionParam as Division) ? (divisionParam as Division) : main;
+  const categories = raced.map((d) => ({ division: d, label: DIVISIONS[d], prediction: predictAt(e, runs, sims, today(), true, d).total, best: bestIn(results, d) }));
+
+  const prediction = predictAt(e, runs, sims, today(), true, division);
   const trend = [];
   for (let i = 12; i >= 0; i--) {
     const d = daysAgo(i * 14);
-    const p = predictAt(e, runs, sims, d, false);
+    const p = predictAt(e, runs, sims, d, false, division);
     trend.push({ date: d.slice(5), total: Math.round(p.total), confidence: p.confidence });
   }
   const sessions = e.activities.filter((a) => a.sport === "HYROX");
-  const results = hyroxResults(e);
-  const pb = results.reduce<HyroxResult | null>((a, r) => (!a || r.total < a.total ? r : a), null);
   return {
+    division,
+    categories,
     results,
-    pb,
+    possibleRaces: possibleRaces(e, results),
+    pb: bestIn(results, division),
     athlete: e.athlete,
     prediction,
     opportunities: opportunities(prediction, 3),
