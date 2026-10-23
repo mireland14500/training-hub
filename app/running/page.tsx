@@ -38,9 +38,22 @@ export default async function Running() {
         <div className="card">
           <div className="label">Threshold HR</div>
           <div className="tabular mt-1 text-2xl font-bold">{d.athlete.threshold_hr}<span className="text-sm font-normal text-muted"> bpm</span></div>
-          <div className="text-xs text-muted">Set in Settings</div>
+          <div className="text-xs text-muted">
+            {d.athlete.garmin_lt_hr && d.athlete.garmin_lt_hr !== d.athlete.threshold_hr ? `Garmin says ${d.athlete.garmin_lt_hr} — update in Settings` : "Set in Settings"}
+          </div>
         </div>
       </div>
+
+      {(d.athlete.garmin_lt_speed || d.athlete.garmin_vo2max) && (
+        <div className="card flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
+          <span className="label">From Garmin</span>
+          {d.athlete.garmin_lt_speed && (
+            <span>Lactate threshold <b className="tabular">{formatPace(1000 / d.athlete.garmin_lt_speed)}/km</b>{d.athlete.garmin_lt_hr ? <> @ <b className="tabular">{d.athlete.garmin_lt_hr} bpm</b></> : null}</span>
+          )}
+          {d.athlete.garmin_vo2max && <span>VO2max <b className="tabular">{d.athlete.garmin_vo2max}</b></span>}
+          {d.athlete.garmin_lt_date && <span className="text-xs text-muted">measured {d.athlete.garmin_lt_date}</span>}
+        </div>
+      )}
 
       <div className="grid gap-4 md:grid-cols-2">
         <div className="card">

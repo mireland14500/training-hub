@@ -35,7 +35,13 @@ create table if not exists athlete (
   goal_distance_m numeric,
   -- HYROX division used for race weights and reference times.
   hyrox_division text not null default 'open_men'
-    check (hyrox_division in ('open_men', 'open_women', 'pro_men', 'pro_women'))
+    check (hyrox_division in ('open_men', 'open_women', 'pro_men', 'pro_women')),
+  -- Filled by scripts/garmin_sync.py from Garmin Connect.
+  garmin_lt_speed numeric,     -- lactate threshold speed, m/s
+  garmin_lt_hr int,            -- lactate threshold heart rate
+  garmin_lt_date date,
+  garmin_vo2max numeric,
+  garmin_synced_at timestamptz
 );
 insert into athlete (id) values (1) on conflict do nothing;
 
@@ -70,7 +76,8 @@ create table if not exists activities (
   details jsonb,               -- SkiErg splits, stroke rate, pace etc.
   photo_path text,
   linked_activity_id uuid references activities (id) on delete set null,
-  excluded boolean not null default false, -- true when merged into a ski log
+  excluded boolean not null default false, -- true when merged into a logged session
+  trainer boolean not null default false,  -- treadmill/indoor: distance unreliable for best efforts
   notes text,
   created_at timestamptz default now()
 );
@@ -108,6 +115,12 @@ create index if not exists benchmarks_station_idx on benchmarks (station, date d
 
 -- Upgrades for databases created from an earlier version of this file.
 alter table athlete add column if not exists hyrox_division text not null default 'open_men';
+alter table athlete add column if not exists garmin_lt_speed numeric;
+alter table athlete add column if not exists garmin_lt_hr int;
+alter table athlete add column if not exists garmin_lt_date date;
+alter table athlete add column if not exists garmin_vo2max numeric;
+alter table athlete add column if not exists garmin_synced_at timestamptz;
+alter table activities add column if not exists trainer boolean not null default false;
 
 alter table strava_auth enable row level security;
 alter table athlete enable row level security;

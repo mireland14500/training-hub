@@ -28,6 +28,7 @@ function toRow(a: StravaActivity, p: AthleteProfile) {
     avg_watts: a.average_watts ?? null,
     calories: a.calories ?? (a.kilojoules ? Math.round(a.kilojoules) : null),
     suffer_score: a.suffer_score ?? null,
+    trainer: !!a.trainer,
     load,
     load_method: method,
     efficiency: isRun(a.sport_type) && a.average_heartrate && a.distance ? efficiencyFactor(a.distance, a.moving_time, a.average_heartrate) : null,
@@ -46,14 +47,15 @@ async function upsertActivity(a: StravaActivity, p: AthleteProfile): Promise<str
 }
 
 /** Fetches streams for one activity and stores zones, best efforts and decoupling. */
-async function processStreams(rowId: string, externalId: number, sport: string, p: AthleteProfile) {
+async function processStreams(rowId: string, externalId: number, sport: string, trainer: boolean, p: AthleteProfile) {
   const s = await getStreams(externalId);
   const time = s.time?.data ?? [];
   const dist = s.distance?.data ?? [];
   const hr = s.heartrate?.data ?? [];
   const update: Record<string, unknown> = { streams_fetched: true };
   if (hr.length) update.zone_seconds = zoneSeconds(time, hr, p.threshold_hr);
-  if (isRun(sport) && dist.length) update.best_efforts = bestEfforts(time, dist);
+  // Treadmill distance comes from the watch's accelerometer, too rough for best efforts.
+  if (isRun(sport) && dist.length && !trainer && sport !== "VirtualRun") update.best_efforts = bestEfforts(time, dist);
   if (isRun(sport) && hr.length && dist.length && time[time.length - 1] >= 40 * 60) update.decoupling = decoupling(time, dist, hr);
   const { error } = await db().from("activities").update(update).eq("id", rowId);
   if (error) throw error;
@@ -96,14 +98,14 @@ export async function syncStrava(): Promise<SyncResult> {
   if (!rateLimited) {
     const { data: pending } = await db()
       .from("activities")
-      .select("id, external_id, sport")
+      .select("id, external_id, sport, trainer")
       .eq("source", "strava")
       .eq("streams_fetched", false)
       .order("start_time", { ascending: false })
       .limit(MAX_STREAM_FETCHES_PER_SYNC);
     for (const a of pending ?? []) {
       try {
-        await processStreams(a.id, a.external_id, a.sport, athlete);
+        await processStreams(a.id, a.external_id, a.sport, a.trainer, athlete);
         streamsProcessed++;
       } catch (e) {
         if (e instanceof StravaRateLimitError) {
@@ -129,7 +131,7 @@ export async function syncOneActivity(externalId: number): Promise<void> {
   const athlete = await getAthlete();
   const a = await getActivity(externalId);
   const id = await upsertActivity(a, athlete);
-  await processStreams(id, a.id, a.sport_type, athlete);
+  await processStreams(id, a.id, a.sport_type, !!a.trainer, athlete);
 }
 
 export async function deleteStravaActivity(externalId: number): Promise<void> {
@@ -146,4 +148,13 @@ export async function recomputeLoads(): Promise<number> {
     await db().from("activities").update({ load, load_method: method }).eq("id", a.id);
   }
   return data?.length ?? 0;
+}
+
+/**
+ * Re-imports summaries for the last year and re-analyses every run's streams
+ * (e.g. after the best-effort logic changes). Runs through the normal rate-limited sync.
+ */
+export async function resetRunAnalysis(): Promise<void> {
+  await db().from("strava_auth").update({ last_sync_at: null }).eq("id", 1);
+  await db().from("activities").update({ streams_fetched: false, best_efforts: null }).eq("source", "strava").in("sport", ["Run", "TrailRun", "VirtualRun"]);
 }

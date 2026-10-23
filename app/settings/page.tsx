@@ -1,4 +1,4 @@
-import { saveSettings } from "@/app/actions";
+import { reanalyseRuns, saveSettings, applyGarminThresholdHr } from "@/app/actions";
 import SyncButton from "@/components/SyncButton";
 import { formatDuration, formatPace } from "@/lib/analysis";
 import { db, getAthlete } from "@/lib/db";
@@ -16,7 +16,7 @@ function Num({ name, label, value, hint }: { name: string; label: string; value:
   );
 }
 
-export default async function Settings({ searchParams }: { searchParams: Promise<{ saved?: string; strava?: string }> }) {
+export default async function Settings({ searchParams }: { searchParams: Promise<{ saved?: string; strava?: string; reanalyse?: string }> }) {
   const sp = await searchParams;
   const [a, { data: strava }] = await Promise.all([getAthlete(), db().from("strava_auth").select("athlete_name, last_sync_at").eq("id", 1).maybeSingle()]);
   return (
@@ -41,10 +41,46 @@ export default async function Settings({ searchParams }: { searchParams: Promise
         <p className="text-xs text-muted">Your Garmin uploads to Strava automatically; new activities arrive here through the Strava webhook.</p>
       </div>
 
+      {sp.reanalyse && <p className="rounded-xl bg-good/15 p-3 text-sm text-good">Runs queued for re-analysis — tap Sync Strava a few times (15 min apart if it hits Strava&apos;s limit).</p>}
+
+      <div className="card space-y-3">
+        <div className="label">Garmin</div>
+        {a.garmin_synced_at ? (
+          <>
+            <div className="text-sm">
+              Last Garmin sync {new Date(a.garmin_synced_at).toLocaleString()}
+              {a.garmin_lt_speed && (
+                <div className="text-xs text-muted">
+                  Lactate threshold {formatPace(1000 / a.garmin_lt_speed)}/km{a.garmin_lt_hr ? ` @ ${a.garmin_lt_hr} bpm` : ""}
+                  {a.garmin_vo2max ? ` · VO2max ${a.garmin_vo2max}` : ""}
+                </div>
+              )}
+            </div>
+            {a.garmin_lt_hr && a.garmin_lt_hr !== a.threshold_hr && (
+              <form action={applyGarminThresholdHr}>
+                <button className="btn-ghost w-full whitespace-normal text-sm">Use Garmin threshold HR: {a.garmin_lt_hr} bpm (now {a.threshold_hr})</button>
+              </form>
+            )}
+          </>
+        ) : (
+          <p className="text-sm text-muted">
+            Not connected. Run <code className="rounded bg-bg px-1">npm run garmin</code> on your computer to import HRV, sleep, resting HR, Body Battery and your Garmin lactate threshold (see README).
+          </p>
+        )}
+      </div>
+
+      <div className="card space-y-2">
+        <div className="label">Running analysis</div>
+        <p className="text-xs text-muted">Re-process all runs with the latest best-effort logic (GPS-spike filtering, treadmill runs excluded). Takes a few syncs because of Strava&apos;s rate limit.</p>
+        <form action={reanalyseRuns}>
+          <button className="btn-ghost w-full text-sm">Re-analyse runs</button>
+        </form>
+      </div>
+
       <form action={saveSettings} className="space-y-4">
         <div className="card space-y-3">
           <div className="label">Heart rate</div>
-          <p className="text-xs text-muted">Threshold HR = roughly your average HR over the last 20 min of a hard 30-min solo effort. Garmin shows an estimate under Performance Stats → Lactate Threshold.</p>
+          <p className="text-xs text-muted">Threshold HR = roughly your average HR over the last 20 min of a hard 30-min solo effort. Garmin shows an estimate under Performance Stats → Lactate Threshold (imported automatically by the Garmin sync).</p>
           <div className="grid grid-cols-3 gap-3">
             <Num name="max_hr" label="Max HR" value={a.max_hr} />
             <Num name="resting_hr" label="Resting HR" value={a.resting_hr} />
@@ -62,7 +98,7 @@ export default async function Settings({ searchParams }: { searchParams: Promise
         <div className="card space-y-3">
           <div className="label">Running fitness</div>
           <p className="text-xs text-muted">Your 1 km HYROX run splits are predicted from this.</p>
-          <Num name="threshold_pace_override" label="Threshold pace override (/km)" value={a.threshold_pace_override ? formatPace(a.threshold_pace_override) : null} hint="Leave blank to estimate automatically from your runs. Format m:ss." />
+          <Num name="threshold_pace_override" label="Threshold pace override (/km)" value={a.threshold_pace_override ? formatPace(a.threshold_pace_override) : null} hint="Leave blank to use Garmin's lactate threshold (if synced), otherwise an estimate from your runs. Format m:ss." />
           <div className="grid grid-cols-3 gap-3">
             <Num name="race_distance_m" label="Race (m)" value={a.race_distance_m} hint="e.g. 10000" />
             <Num name="race_time" label="Time" value={a.race_time_s ? formatDuration(a.race_time_s) : null} hint="h:mm:ss" />

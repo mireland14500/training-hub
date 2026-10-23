@@ -142,10 +142,11 @@ export const EFFORT_DURATIONS = [180, 360, 720, 1200, 1800, 3600];
  * Best distance (m) covered in each target duration, using two pointers over the
  * time/distance streams. Returns { "180": metres, ... } for durations that fit.
  */
-export function bestEfforts(time: number[], distance: number[], durations = EFFORT_DURATIONS): Record<string, number> {
+export function bestEfforts(time: number[], rawDistance: number[], durations = EFFORT_DURATIONS): Record<string, number> {
   const out: Record<string, number> = {};
-  const n = Math.min(time.length, distance.length);
+  const n = Math.min(time.length, rawDistance.length);
   if (n < 2) return out;
+  const distance = cleanDistance(time, rawDistance);
   for (const d of durations) {
     if (time[n - 1] - time[0] < d) continue;
     let best = 0;
@@ -161,6 +162,23 @@ export function bestEfforts(time: number[], distance: number[], durations = EFFO
       best = Math.max(best, distAt - distance[i]);
     }
     if (best > 0) out[String(d)] = round(best, 1);
+  }
+  return out;
+}
+
+/** Fastest believable running speed (m/s) — GPS jumps faster than this are clipped. */
+export const MAX_RUN_SPEED = 7;
+
+/**
+ * Removes GPS glitches: any step implying more than MAX_RUN_SPEED (tunnels, signal
+ * loss, urban canyons) is clipped, so one jump can't create a fake best effort.
+ */
+export function cleanDistance(time: number[], distance: number[]): number[] {
+  const out = [distance[0] ?? 0];
+  for (let i = 1; i < Math.min(time.length, distance.length); i++) {
+    const dt = Math.max(0, time[i] - time[i - 1]);
+    const step = Math.max(0, distance[i] - distance[i - 1]);
+    out.push(out[i - 1] + Math.min(step, dt * MAX_RUN_SPEED));
   }
   return out;
 }

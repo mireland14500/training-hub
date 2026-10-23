@@ -92,6 +92,7 @@ export interface StravaActivity {
   calories?: number;
   suffer_score?: number | null;
   has_heartrate: boolean;
+  trainer?: boolean;
 }
 
 export function listActivities(afterEpoch: number, page: number): Promise<StravaActivity[]> {

@@ -43,6 +43,7 @@ export interface ActivityRow {
   photo_path: string | null;
   linked_activity_id: string | null;
   excluded: boolean;
+  trainer: boolean;
   notes: string | null;
 }
 
@@ -59,6 +60,11 @@ export interface AthleteRow {
   goal_date: string | null;
   goal_distance_m: number | null;
   hyrox_division: "open_men" | "open_women" | "pro_men" | "pro_women";
+  garmin_lt_speed: number | null;
+  garmin_lt_hr: number | null;
+  garmin_lt_date: string | null;
+  garmin_vo2max: number | null;
+  garmin_synced_at: string | null;
 }
 
 export interface BenchmarkRow {

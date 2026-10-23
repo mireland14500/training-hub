@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { pace500FromWatts, sessionLoad } from "@/lib/analysis";
 import { db, getAthlete } from "@/lib/db";
-import { recomputeLoads } from "@/lib/sync";
+import { recomputeLoads, resetRunAnalysis } from "@/lib/sync";
 
 function num(form: FormData, key: string): number | null {
   const v = String(form.get(key) ?? "").trim();
@@ -220,4 +220,21 @@ export async function deleteActivity(id: string) {
   if (data.photo_path) await db().storage.from("ski-photos").remove([data.photo_path]);
   await db().from("activities").delete().eq("id", id);
   revalidatePath("/", "layout");
+}
+
+/** Copies Garmin's lactate threshold HR into your HR settings and re-scores training load. */
+export async function applyGarminThresholdHr() {
+  const athlete = await getAthlete();
+  if (!athlete.garmin_lt_hr) return;
+  await db().from("athlete").update({ threshold_hr: athlete.garmin_lt_hr }).eq("id", 1);
+  await recomputeLoads();
+  revalidatePath("/", "layout");
+  redirect("/settings?saved=1");
+}
+
+/** Queues every run for re-analysis on the next syncs (after best-effort logic changes). */
+export async function reanalyseRuns() {
+  await resetRunAnalysis();
+  revalidatePath("/", "layout");
+  redirect("/settings?reanalyse=1");
 }

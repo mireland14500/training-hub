@@ -39,7 +39,7 @@ export default async function Checkin() {
     <div className="mx-auto max-w-lg space-y-4">
       <div>
         <h1 className="text-2xl font-bold">Morning check-in</h1>
-        <p className="text-sm text-muted">Copy the numbers from Garmin Connect (My Day). Skip any you don&apos;t have — takes 20 seconds.</p>
+        <p className="text-sm text-muted">If you run the Garmin sync (<code>npm run garmin</code>), the Garmin numbers fill in automatically — just add soreness and energy. Otherwise copy them from Garmin Connect (My Day).</p>
       </div>
       <form action={saveCheckin} className="card space-y-4">
         <input type="hidden" name="date" value={date} />

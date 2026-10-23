@@ -84,6 +84,12 @@ describe("running", () => {
     expect(e["360"]).toBeCloseTo(1800, 0);
     expect(e["720"]).toBeCloseTo(1800 + 360 * 3, 0);
   });
+  it("ignores GPS jumps when finding best efforts", () => {
+    const time = Array.from({ length: 1201 }, (_, t) => t);
+    const dist = time.map((t) => t * 3 + (t >= 600 ? 400 : 0)); // 400 m teleport at 10:00
+    const e = bestEfforts(time, dist, [180]);
+    expect(e["180"]).toBeLessThan(180 * 3 + 10); // clipped to ≤7 m/s for that one second
+  });
   it("recovers critical speed from a known model", () => {
     const cs = 4.2;
     const dPrime = 200;

@@ -23,7 +23,7 @@ Garmin watch ──▶ Garmin Connect ──▶ Strava ──(webhook + sync)─
                        └──── HRV / sleep / Body Battery ─(morning check-in, typed in)
 ```
 
-Garmin doesn't share HRV, sleep or Body Battery with Strava. Garmin's own Health API is only open to approved business partners. So the morning check-in screen asks for those numbers; it takes about 20 seconds.
+Garmin doesn't share HRV, sleep or Body Battery with Strava. To get them, run the Garmin sync below, or type them into the morning check-in.
 
 ## Setup (about 20 minutes, all free tiers)
 
@@ -70,6 +70,28 @@ npm run dev
 - **A recent race (optional).** It's the most accurate source for paces and predictions.
 - **HYROX division and next race date.** These set race weights, reference times and taper timing.
 
+## Garmin sync (recovery data and lactate threshold)
+
+`npm run garmin` imports the following from Garmin Connect:
+- Overnight HRV, sleep score and hours, resting HR, Body Battery at wake, and Garmin Training Readiness. These go into each day's check-in. Your soreness and energy entries are kept.
+- Garmin's running **lactate threshold** (pace and HR) and **VO2max**. A Garmin threshold from the last 120 days becomes the main source for your threshold pace, training paces, race predictions and HYROX run splits. A manual override in Settings still takes priority.
+
+```bash
+npm run garmin                 # last 7 days (30 on the first run)
+npm run garmin -- --days 60    # backfill more history
+npm run garmin -- --debug      # show Garmin's raw responses if something looks wrong
+```
+
+- **What you need:** Python 3, which macOS already has. The first run creates a `.venv-garmin` folder and installs the [`garminconnect`](https://github.com/cyberjunky/python-garminconnect) library into it.
+- **Logging in:** the first run asks for your Garmin email, password and MFA code if you use one. After that, login tokens are saved in `~/.garminconnect`, so your password isn't stored. To avoid the prompt, you can instead put `GARMIN_EMAIL` and `GARMIN_PASSWORD` in `.env.local`.
+- **Run it each morning**, or schedule it on your Mac, e.g. `crontab -e` and add:
+  `30 7 * * * cd /path/to/training-hub && npm run garmin >> garmin.log 2>&1`
+- **Caveat:** Garmin only offers an official API to approved businesses, so this uses an unofficial library that logs in as you. It can break when Garmin changes their site; updating the library usually fixes it: `.venv-garmin/bin/pip install -U garminconnect`.
+
+After the first Garmin sync, open **Settings**:
+- **Use Garmin threshold HR** copies Garmin's lactate threshold HR into your zones and re-scores your training load.
+- **Re-analyse runs** re-processes your runs with GPS-spike filtering, and treadmill runs are left out of best efforts. It takes a few **Sync Strava** taps because of Strava's rate limit.
+
 ## How the HYROX prediction works
 
 Race = 8 × 1 km run + 8 stations + Roxzone. Each segment uses your most recent evidence from the last 120 days:
@@ -112,9 +134,9 @@ When you can add a session, the app suggests the most useful one, in this order:
 | Fitness / Fatigue / Form | 42-day and 7-day exponentially weighted load. Form = yesterday's fitness − fatigue. |
 | Acute:chronic | 7-day load ÷ average weekly load over 28 days. 0.8–1.3 is the usual sweet spot. |
 | Readiness | Weighted blend of form, HRV vs your 28-day baseline, resting HR vs baseline, sleep score, Body Battery, soreness and energy. |
-| Best efforts | Fastest distance covered in 3/6/12/20/30/60 minutes, taken from Strava's per-second streams. |
+| Best efforts | Fastest distance covered in 3/6/12/20/30/60 minutes, taken from Strava's per-second streams. GPS jumps faster than 7 m/s are clipped, and treadmill runs are skipped. |
 | Critical speed | Linear fit of distance against time over your 3–20 minute best efforts (last 90 days). |
-| VDOT, paces, predictions | Daniels/Gilbert oxygen-cost equations. The source is your manual override, then a race from the last 4 months, then the best of the critical-speed and best-effort estimates. |
+| VDOT, paces, predictions | Daniels/Gilbert oxygen-cost equations. The source, in order: manual override, then Garmin lactate threshold (last 120 days), then a race from the last 4 months, then the best of the critical-speed and best-effort estimates. |
 | HR zones | Friel zones as a % of threshold HR. |
 | Efficiency factor | Metres per minute ÷ average HR, on easy runs. |
 | Decoupling | Change in pace:HR between the first and second half of runs of 40 minutes or more. |
@@ -129,6 +151,7 @@ lib/strava.ts       Strava OAuth and API client
 lib/sync.ts         import, stream analysis, webhook handling
 lib/hyrox.ts        HYROX race model and prediction (pure, unit tested)
 lib/plan.ts         weekly add/hold/reduce advice (pure, unit tested)
+scripts/garmin_sync.py  imports recovery data and lactate threshold from Garmin Connect
 lib/vision.ts       reads erg monitors and HYROX result screenshots with Claude
 supabase/schema.sql database schema
 tests/              unit tests (npm test)

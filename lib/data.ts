@@ -140,6 +140,12 @@ function estimate(athlete: AthleteRow, efforts: Record<string, number>, refDate:
     const speed = 1000 / athlete.threshold_pace_override;
     return { vdot: round(vdotFromThresholdSpeed(speed), 1), thresholdSpeed: speed, source: "Manual threshold pace (Settings)", candidates, cs };
   }
+  // Garmin's lactate threshold (from the watch's guided test or auto-detection), if recent.
+  const ltAge = athlete.garmin_lt_date ? Date.parse(refDate) - Date.parse(athlete.garmin_lt_date) : NaN;
+  if (athlete.garmin_lt_speed && ltAge >= 0 && ltAge < 120 * 86400000) {
+    const speed = athlete.garmin_lt_speed;
+    return { vdot: round(vdotFromThresholdSpeed(speed), 1), thresholdSpeed: speed, source: `Garmin lactate threshold (${athlete.garmin_lt_date})`, candidates, cs };
+  }
   if (!candidates.length) return { vdot: null, thresholdSpeed: null, source: "Not enough data yet", candidates, cs };
   // A recent race is the most reliable; otherwise training efforts tend to underestimate, so take the best.
   const race = candidates.find((c) => c.source === "Recent race result");
@@ -149,8 +155,9 @@ function estimate(athlete: AthleteRow, efforts: Record<string, number>, refDate:
 }
 
 /** Running VDOT as of a date, from the 90 days of runs before it. */
+// Trends (useOverride = false) use only your runs, so they stay comparable over time.
 function vdotAsOf(runs: ActivityRow[], athlete: AthleteRow, date: string, useOverride: boolean): number | null {
-  const a = useOverride ? athlete : { ...athlete, threshold_pace_override: null };
+  const a = useOverride ? athlete : { ...athlete, threshold_pace_override: null, garmin_lt_speed: null };
   return estimate(a, bestEffortsWithin(runs, shift(date, -89), date), date).vdot;
 }
 
