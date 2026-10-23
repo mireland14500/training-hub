@@ -66,6 +66,7 @@ export async function saveSettings(form: FormData) {
     hyrox_division: ["open_men", "open_women", "pro_men", "pro_women"].includes(String(form.get("hyrox_division")))
       ? String(form.get("hyrox_division"))
       : before.hyrox_division,
+    show_predictions: form.get("show_predictions") === "on",
   };
   const { error } = await db().from("athlete").upsert(row);
   if (error) throw error;

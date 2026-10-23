@@ -2,7 +2,7 @@ import Link from "next/link";
 import { copySessionDetails, deleteTimeOff, saveTimeOff } from "@/app/actions";
 import { CATEGORY_COLOR, CATEGORY_LABEL, FOCUS_LABEL } from "@/components/categories";
 import { formatDuration } from "@/lib/analysis";
-import { calendarData, type CalendarSession } from "@/lib/data";
+import { calendarData, todayData, type CalendarSession } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
@@ -79,6 +79,7 @@ export default async function Calendar({ searchParams }: { searchParams: Promise
   ].filter((x) => x.value > 0);
   const catTotal = Object.values(d.summary.byCategory).reduce((a, b) => a + b, 0);
   const isThisWeek = d.today >= d.monday && d.today <= d.sunday;
+  const todayCall = isThisWeek ? (await todayData()).call : null;
 
   return (
     <div className="space-y-4">
@@ -211,6 +212,12 @@ export default async function Calendar({ searchParams }: { searchParams: Promise
             )}
             <div className="space-y-2">
               {day.sessions.map((s) => <SessionCard key={s.id} s={s} />)}
+              {todayCall && day.date === d.today && (
+                <Link href="/" className="block rounded-xl border border-dashed border-accent p-2.5 text-sm hover:bg-accent/5">
+                  <span className="text-xs font-bold uppercase text-accent">{todayCall.call} today</span>
+                  <span className="mt-0.5 block font-semibold leading-snug">{todayCall.session}</span>
+                </Link>
+              )}
               <Link href={`/session/new?date=${day.date}`} className="block rounded-xl border border-dashed border-border py-1.5 text-center text-xs text-muted hover:border-accent hover:text-accent">
                 + Add
               </Link>

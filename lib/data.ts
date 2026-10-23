@@ -5,6 +5,7 @@ import {
   criticalSpeed,
   formatDuration,
   formatPace,
+  hrZoneBounds,
   monotony,
   pmc,
   predictTime,
@@ -34,12 +35,15 @@ import {
   type Benchmark,
   type Prediction,
 } from "./hyrox";
-import { categorize, weeklyPlan, type SessionSummary, type TimeOff } from "./plan";
+import { categorize, timeOffStatus, weeklyPlan, type SessionSummary, type TimeOff } from "./plan";
+import { recoveryStatus, todayCall, type RecoveryDay } from "./recovery";
+import { paceAtHr, weeklyMedian, windowChange } from "./running";
 import {
   addEntryVolumes,
   benchmarksFromEntries,
   bestTemplate,
   emptyVolumes,
+  entryPace,
   entryTags,
   ergSessionsFromEntries,
   summarize,
@@ -423,53 +427,76 @@ function dailyLoads(activities: ActivityRow[]): Map<string, number> {
 // Today (recovery + weekly plan)
 // ---------------------------------------------------------------------------
 
-export async function dashboardData() {
+/** Run sessions that count as threshold, intervals or long, for "what's missing this week". */
+function runKind(a: ActivityRow): "threshold" | "intervals" | "long" | null {
+  const isRunish = isRun(a.sport) || entryTags(a.entries).run || a.focus === "threshold" || a.focus === "intervals";
+  if (!isRunish) return null;
+  // Your session type wins; then the name — threshold words before rep patterns ("Threshold 3×10'").
+  if (a.focus === "intervals") return "intervals";
+  if (a.focus === "threshold" || /tempo|threshold|cruise|lt\b/i.test(a.name ?? "")) return "threshold";
+  if (/interval|reps|\d\s*[x×]\s*\d|track|vo2/i.test(a.name ?? "")) return "intervals";
+  if ((a.zone_seconds?.[3] ?? 0) >= 900 && isRun(a.sport)) return "threshold";
+  if (a.focus === "long" || (isRun(a.sport) && (a.moving_s ?? a.duration_s) >= 75 * 60)) return "long";
+  return null;
+}
+
+/** Today: recovery against your baseline, Push / Easy / Rest, and this week's training call. */
+export async function todayData() {
   const [e, strava] = await Promise.all([loadEverything(), db().from("strava_auth").select("athlete_name, last_sync_at").eq("id", 1).maybeSingle()]);
   const { athlete, activities, checkins } = e;
   const counted = activities.filter((a) => !a.excluded);
   const runs = activities.filter((a) => isRun(a.sport));
+  const t = today();
 
-  const series = pmc(dailyLoads(activities), daysAgo(199), today());
-  const latest = series[series.length - 1];
+  const days: RecoveryDay[] = checkins.map((c) => ({
+    date: c.date,
+    hrv: c.hrv_ms,
+    rhr: c.resting_hr,
+    sleep: c.sleep_score,
+    sleepHours: c.sleep_hours,
+    bodyBattery: c.body_battery,
+    readiness: c.training_readiness,
+  }));
+  const metrics = recoveryStatus(days, t);
+
+  const series = pmc(dailyLoads(activities), daysAgo(199), t);
   const ratio = acwr(series);
-  const mono = monotony(series);
+  const byDay = (d: string) => counted.filter((a) => localDate(a.start_time) === d);
+  const hardOn = (d: string) => byDay(d).some(isHardSession);
+  const off = timeOffStatus(e.timeOff, t);
 
-  const todayCheckin = checkins.find((c) => c.date === today()) ?? null;
-  const ready = readiness(latest?.tsb ?? null, todayCheckin, checkins);
-  // Readiness for the last 3 days that have a check-in.
-  const recentReady = [2, 1, 0]
-    .map((n) => {
-      const d = daysAgo(n);
-      const c = checkins.find((x) => x.date === d);
-      const p = series.find((x) => x.date === d);
-      return c ? readiness(p?.tsb ?? null, c, checkins).score : null;
-    })
-    .filter((x): x is number => x !== null);
+  const since7 = daysAgo(6);
+  const kinds = counted.filter((a) => localDate(a.start_time) >= since7).map(runKind);
+  const vdot = vdotAsOf(runs, athlete, t, true);
+  const paceZones = vdot ? trainingPaces(vdot) : null;
+  const mid = (name: string) => {
+    const z = paceZones?.find((x) => x.name === name);
+    return z ? formatPace((z.range[0] + z.range[1]) / 2) : "";
+  };
 
-  const hardDays = new Set(counted.filter(isHardSession).map((a) => localDate(a.start_time)));
-  let hardDaysInRow = 0;
-  for (let i = 1; i <= 7 && hardDays.has(daysAgo(i)); i++) hardDaysInRow++;
-  let daysSinceHard: number | null = null;
-  for (let i = 0; i <= 30; i++) if (hardDays.has(daysAgo(i))) { daysSinceHard = i; break; }
+  const call = todayCall({
+    metrics,
+    hasCheckin: days.some((d) => d.date === t),
+    acwr: ratio,
+    hardYesterday: hardOn(daysAgo(1)),
+    hardInLast3Days: [1, 2, 3].filter((n) => hardOn(daysAgo(n))).length,
+    trainedToday: byDay(t).some((a) => (a.load ?? 0) >= 20),
+    illNow: off.now?.reason === "ill" || off.now?.reason === "injury",
+    daysSinceTimeOff: off.back?.days ?? null,
+    last7: { threshold: kinds.includes("threshold"), intervals: kinds.includes("intervals"), long: kinds.includes("long") },
+    paces: paceZones ? { easy: mid("Easy"), threshold: mid("Threshold"), interval: mid("Interval") } : null,
+    easyHrMax: hrZoneBounds(athlete.threshold_hr)[1].max,
+  });
 
-  // Intensity distribution, last 28 days (HR-zone time).
+  // Weekly call (add / hold / reduce …), aimed at running unless HYROX predictions are switched on.
   const zones = [0, 0, 0, 0, 0];
-  for (const a of counted) {
-    if (a.zone_seconds && localDate(a.start_time) >= daysAgo(27)) a.zone_seconds.forEach((s, i) => (zones[i] += s));
-  }
+  for (const a of counted) if (a.zone_seconds && localDate(a.start_time) >= daysAgo(27)) a.zone_seconds.forEach((s, i) => (zones[i] += s));
   const zoneTotal = zones.reduce((a, b) => a + b, 0);
   const hardShare = zoneTotal > 0 ? (zones[2] + zones[3] + zones[4]) / zoneTotal : null;
-
-  const cues = coachingCues({ readiness: ready, tsb: latest?.tsb ?? null, acwr: ratio, monotony: mono, hardDaysInRow, daysSinceHard, intensityShareHard: hardShare });
-
   const goal =
-    athlete.goal_date && athlete.goal_date >= today()
-      ? { name: athlete.goal_name ?? "Goal race", date: athlete.goal_date, daysTo: Math.round((Date.parse(athlete.goal_date) - Date.parse(today())) / 86400000) }
+    athlete.goal_date && athlete.goal_date >= t
+      ? { name: athlete.goal_name ?? "Goal race", date: athlete.goal_date, daysTo: Math.round((Date.parse(athlete.goal_date) - Date.parse(t)) / 86400000) }
       : null;
-
-  const prediction = predictAt(e, runs, hyroxSessions(e, runs), today(), true);
-  const vdot = vdotAsOf(runs, athlete, today(), true);
-
   const sessions: SessionSummary[] = counted
     .filter((a) => localDate(a.start_time) >= daysAgo(34))
     .map((a) => ({
@@ -481,50 +508,45 @@ export async function dashboardData() {
       quality: isQualitySession(a),
       tags: entryTags(a.entries),
     }));
-
   const plan = weeklyPlan({
-    today: today(),
+    today: t,
     pmc: series,
     acwr: ratio,
-    readinessToday: todayCheckin ? ready.score : null,
-    readinessRecent: recentReady,
+    readinessToday: null,
+    readinessRecent: [],
     hardShare,
     sessions,
     daysToGoal: goal?.daysTo ?? null,
-    thresholdPace: vdot ? formatPace(thresholdPaceFromVdot(vdot)) : null,
+    thresholdPace: mid("Threshold") || null,
     timeOff: e.timeOff,
-    weakStations: opportunities(prediction, 4).filter((o) => o.key !== "runs" && o.key !== "roxzone").map((o) => o.name.replace(/ \d.*$/, "")),
+    goal: athlete.show_predictions ? "hyrox" : "running",
+    weakStations: [],
   });
-
-  // Weekly load by type, last 12 weeks.
-  const groups = ["Run", "Erg", "HYROX & strength", "Other"] as const;
-  const weeks = new Map<string, Record<string, number>>();
-  for (let i = 11; i >= 0; i--) weeks.set(weekStart(daysAgo(i * 7)), Object.fromEntries(groups.map((g) => [g, 0])));
-  for (const a of counted) {
-    const w = weeks.get(weekStart(localDate(a.start_time)));
-    if (w) w[sportGroup(a)] += a.load ?? 0;
+  // Recovery feeds the weekly call too: a run of poor recovery days means don't add.
+  const lowDays = [0, 1, 2].filter((n) => {
+    const m = recoveryStatus(days, daysAgo(n));
+    return m.filter((x) => x.status === "low").length >= 2;
+  }).length;
+  if (plan.verdict === "add" && (lowDays >= 2 || call.call === "rest")) {
+    plan.verdict = "maintain";
+    plan.headline = "Hold — recovery is lagging";
+    plan.reasons.unshift("Load says you could add, but your recovery numbers have been low — hold until they bounce back.");
+    plan.suggestions.splice(0, plan.suggestions.length, { action: "keep", session: "Keep your planned sessions, no extras", why: "Adding load while HRV/resting HR are off usually backfires." });
   }
 
+  const lastGarmin = athlete.garmin_synced_at;
   return {
     athlete,
     stravaConnected: !!strava.data,
     lastSync: strava.data?.last_sync_at ?? null,
+    lastGarmin,
     hasActivities: activities.length > 0,
-    readiness: ready,
-    checkedInToday: !!todayCheckin,
-    today: latest,
-    acwr: ratio,
-    monotony: mono,
-    cues,
+    hasCheckin: days.some((d) => d.date === t),
+    metrics,
+    call,
     plan,
-    prediction,
-    hyroxPb: bestIn(hyroxResults(e), e.athlete.hyrox_division as Division),
-    pmc: series.slice(-90),
-    zones: zones.map((s) => Math.round(s / 60)),
-    weekly: [...weeks.entries()].map(([week, v]) => ({ week: week.slice(5), ...Object.fromEntries(Object.entries(v).map(([k, x]) => [k, Math.round(x)])) })),
-    wellness: checkins.slice(-30).map((c) => ({ date: c.date.slice(5), hrv: c.hrv_ms, rhr: c.resting_hr, sleep: c.sleep_score, bb: c.body_battery })),
     goal,
-    recent: activities.slice(0, 5),
+    easyShare: hardShare === null ? null : Math.round((1 - hardShare) * 100),
   };
 }
 
@@ -985,4 +1007,79 @@ export async function templatesFor(a: ActivityRow | null): Promise<{ suggestedId
       label: `${new Date(t.date + "T00:00:00Z").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" })} · ${t.name ?? t.sport} · ${summarize(t.entries, 2)}`,
     }));
   return { suggestedId: suggested?.id ?? null, templates: list };
+}
+
+// ---------------------------------------------------------------------------
+// Running progress (what you actually ran — no predictions)
+// ---------------------------------------------------------------------------
+
+/** Pace of the hard part of a quality session: logged reps if any, else Strava's best 20/6-min stretch. */
+function qualityPace(a: ActivityRow, kind: "threshold" | "intervals"): number | null {
+  const reps = (a.entries ?? []).filter((x) => x.exercise === "run" || x.exercise === "treadmill");
+  const paces = reps.map(entryPace).filter((p): p is number => p !== null);
+  if (paces.length) return paces.reduce((s, p) => s + p, 0) / paces.length;
+  const key = kind === "threshold" ? "1200" : "360";
+  const metres = a.best_efforts?.[key];
+  return metres ? Number(key) / (metres / 1000) : null;
+}
+
+export async function runningProgress() {
+  const [athlete, activities] = await Promise.all([getAthlete(), getActivities(400)]);
+  const runs = activities.filter((a) => isRun(a.sport) && !a.excluded);
+  const t = today();
+
+  // Easy pace at a fixed heart rate (~Z2), one point per easy run.
+  const refHr = Math.round(athlete.threshold_hr * 0.85);
+  const easy = runs.filter(
+    (r) =>
+      r.avg_hr &&
+      r.distance_m &&
+      r.distance_m >= 3000 &&
+      (r.moving_s ?? r.duration_s) >= 20 * 60 &&
+      r.avg_hr < athlete.threshold_hr * 0.9 &&
+      r.avg_hr > athlete.resting_hr + 20,
+  );
+  const easyPoints = easy.map((r) => ({ date: localDate(r.start_time), value: paceAtHr(r.distance_m!, r.moving_s ?? r.duration_s, r.avg_hr!, refHr) }));
+  const weekly = weeklyMedian(easyPoints.filter((p) => p.date >= daysAgo(12 * 7)));
+  const easyChange = windowChange(easyPoints, t, 28);
+
+  // Weekly km: this week so far vs the average of the previous 4 full weeks.
+  const thisWeek = weekStart(t);
+  const kmBetween = (from: string, to: string) =>
+    runs.filter((r) => localDate(r.start_time) >= from && localDate(r.start_time) <= to).reduce((s, r) => s + (r.distance_m ?? 0), 0) / 1000;
+  const weekKm = kmBetween(thisWeek, t);
+  const avgKm = kmBetween(shift(thisWeek, -28), shift(thisWeek, -1)) / 4;
+
+  // Best efforts: last 90 days vs the 90 before.
+  const recent = stravaBestsWithin(runs, daysAgo(89), t);
+  const before = stravaBestsWithin(runs, daysAgo(179), daysAgo(90));
+  const bests = ["1K", "1 mile", "5K", "10K", "Half-Marathon"]
+    .filter((n) => recent[n] || before[n])
+    .map((n) => ({ name: n === "Half-Marathon" ? "Half" : n, recent: recent[n] ?? null, before: before[n] ?? null }));
+
+  // Quality sessions, newest first.
+  const quality = activities
+    .filter((a) => !a.excluded && localDate(a.start_time) >= daysAgo(60))
+    .map((a) => ({ a, kind: runKind(a) }))
+    .filter((x): x is { a: ActivityRow; kind: "threshold" | "intervals" } => x.kind === "threshold" || x.kind === "intervals")
+    .slice(0, 6)
+    .map(({ a, kind }) => ({ id: a.id, date: localDate(a.start_time), name: a.name ?? kind, kind, pace: qualityPace(a, kind) }));
+
+  const vdot = vdotAsOf(runs, athlete, t, true);
+  const paces = vdot ? trainingPaces(vdot).filter((z) => ["Easy", "Threshold", "Interval"].includes(z.name)) : [];
+
+  return {
+    athlete,
+    hasRuns: runs.length > 0,
+    refHr,
+    weekly: weekly.map((w) => ({ date: w.date, value: Math.round(w.value) })),
+    easyNow: weekly.length ? weekly[weekly.length - 1].value : null,
+    easyChange,
+    weekKm,
+    avgKm,
+    bests,
+    hasStravaBests: Object.keys(stravaBestsWithin(runs, "0000-01-01", t)).length > 0,
+    quality,
+    paces,
+  };
 }

@@ -112,6 +112,13 @@ export default async function Settings({ searchParams }: { searchParams: Promise
 
         <div className="card space-y-3">
           <div className="label">HYROX</div>
+          <label className="flex items-start gap-3 rounded-xl border border-border p-3">
+            <input type="checkbox" name="show_predictions" defaultChecked={a.show_predictions} className="mt-1 h-5 w-5 accent-[var(--accent)]" />
+            <span>
+              <span className="block font-semibold">Show HYROX predictions &amp; Progress</span>
+              <span className="block text-xs text-muted">Adds the HYROX and Progress tabs, and makes the weekly advice include station, erg and sim work. Off = recovery and running focus.</span>
+            </span>
+          </label>
           <label className="block">
             <span className="label">Division</span>
             <select name="hyrox_division" defaultValue={a.hyrox_division} className="input mt-1">

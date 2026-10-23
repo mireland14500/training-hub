@@ -1,111 +1,72 @@
 import Link from "next/link";
-import { PmcChart, WeeklyLoadChart, WellnessChart } from "@/components/Charts";
+import BandSparkline from "@/components/BandSparkline";
 import SyncButton from "@/components/SyncButton";
-import { formatDuration, HR_ZONE_NAMES } from "@/lib/analysis";
-import { dashboardData, localDate } from "@/lib/data";
-import type { PlanAdvice, Verdict } from "@/lib/plan";
+import { todayData } from "@/lib/data";
+import type { Verdict } from "@/lib/plan";
+import type { Call, MetricStatus } from "@/lib/recovery";
 
 export const dynamic = "force-dynamic";
 
-const LABEL_COLOR = { Primed: "var(--good)", Ready: "var(--good)", Moderate: "var(--warn)", Recover: "var(--bad)" } as const;
-
-function Ring({ score, color }: { score: number; color: string }) {
-  const r = 52;
-  const c = 2 * Math.PI * r;
-  return (
-    <svg viewBox="0 0 120 120" className="h-32 w-32 -rotate-90">
-      <circle cx="60" cy="60" r={r} fill="none" stroke="var(--border)" strokeWidth="10" />
-      <circle cx="60" cy="60" r={r} fill="none" stroke={color} strokeWidth="10" strokeLinecap="round" strokeDasharray={`${(score / 100) * c} ${c}`} />
-    </svg>
-  );
-}
-
-const VERDICT: Record<Verdict, { label: string; color: string }> = {
-  add: { label: "ADD", color: "var(--good)" },
-  maintain: { label: "HOLD", color: "var(--c-ctl)" },
-  reduce: { label: "REDUCE", color: "var(--warn)" },
-  deload: { label: "DELOAD", color: "var(--bad)" },
-  taper: { label: "TAPER", color: "var(--c-ski)" },
-  rest: { label: "REST", color: "var(--c-other)" },
-  return: { label: "BUILD BACK", color: "var(--c-ski)" },
+const CALL_STYLE: Record<Call, { badge: string; bg: string; border: string; text: string }> = {
+  push: { badge: "PUSH", bg: "color-mix(in srgb, var(--good) 12%, var(--card))", border: "color-mix(in srgb, var(--good) 45%, transparent)", text: "var(--good)" },
+  easy: { badge: "EASY", bg: "color-mix(in srgb, var(--c-run) 12%, var(--card))", border: "color-mix(in srgb, var(--c-run) 45%, transparent)", text: "var(--c-run)" },
+  rest: { badge: "REST", bg: "color-mix(in srgb, var(--warn) 12%, var(--card))", border: "color-mix(in srgb, var(--warn) 45%, transparent)", text: "var(--warn)" },
 };
-const ACTION_ICON = { add: "＋", drop: "−", swap: "⇄", keep: "✓" };
 
-function PlanCard({ plan }: { plan: PlanAdvice }) {
-  const v = VERDICT[plan.verdict];
-  const max = Math.max(plan.target.high * 1.15, plan.weekSoFar);
-  const pct = (x: number) => `${Math.min(100, (x / max) * 100)}%`;
+const VERDICT: Record<Verdict, string> = {
+  add: "ADD 1 SESSION",
+  maintain: "HOLD",
+  reduce: "EASE OFF",
+  deload: "LIGHTER WEEK",
+  taper: "TAPER",
+  rest: "REST",
+  return: "BUILD BACK",
+};
+
+const STATUS_COLOR = { good: "var(--good)", ok: "var(--warn)", low: "var(--bad)" } as const;
+const ACTION_ICON = { add: "+", drop: "−", swap: "⇄", keep: "✓" };
+
+function Tile({ m, suffix }: { m: MetricStatus | undefined; suffix?: string }) {
+  if (!m) return null;
   return (
-    <div className="card">
-      <div className="flex items-center justify-between gap-2">
-        <div className="label">This week</div>
-        <span className="rounded-full px-2.5 py-0.5 text-xs font-bold text-white" style={{ background: v.color }}>{v.label}</span>
-      </div>
-      <div className="mt-1 text-lg font-bold">{plan.headline}</div>
-      <ul className="mt-1 space-y-0.5 text-sm text-muted">
-        {plan.reasons.map((r) => <li key={r}>{r}</li>)}
-      </ul>
-      <ul className="mt-3 space-y-2">
-        {plan.suggestions.map((s) => (
-          <li key={s.session} className="flex gap-2 rounded-xl bg-bg p-2.5 text-sm">
-            <span className="w-4 shrink-0 text-center font-bold" style={{ color: v.color }}>{ACTION_ICON[s.action]}</span>
-            <div>
-              <div className="font-semibold">{s.session}</div>
-              <div className="text-xs text-muted">{s.why}</div>
-            </div>
-          </li>
-        ))}
-      </ul>
-      <div className="mt-3">
-        <div className="flex justify-between text-xs text-muted">
-          <span>Weekly load so far: <b className="tabular text-text">{plan.weekSoFar}</b></span>
-          <span className="tabular">target {plan.target.low}–{plan.target.high} · {plan.daysLeft} day{plan.daysLeft === 1 ? "" : "s"} left</span>
-        </div>
-        <div className="relative mt-1 h-2.5 rounded-full bg-border">
-          <div className="absolute inset-y-0 rounded-full opacity-30" style={{ left: pct(plan.target.low), width: `calc(${pct(plan.target.high)} - ${pct(plan.target.low)})`, background: v.color }} />
-          <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: pct(plan.weekSoFar), background: v.color }} />
-        </div>
-      </div>
+    <div className="card p-3">
+      <div className="text-[11px] font-semibold uppercase text-muted">{m.label.replace(" (ms)", "")}</div>
+      <div className="tabular mt-1 text-2xl font-extrabold">{m.today ?? "–"}{m.today != null && suffix ? <span className="text-sm font-normal text-muted"> {suffix}</span> : null}</div>
+      <div className="text-xs" style={{ color: m.status ? STATUS_COLOR[m.status] : "var(--muted)" }}>{m.note || "No data"}</div>
     </div>
   );
 }
 
-function Stat({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: string }) {
-  return (
-    <div className="card">
-      <div className="label">{label}</div>
-      <div className="tabular mt-1 text-2xl font-bold" style={tone ? { color: tone } : undefined}>
-        {value}
-      </div>
-      {hint && <div className="mt-0.5 text-xs text-muted">{hint}</div>}
-    </div>
-  );
-}
-
-export default async function Dashboard() {
-  const d = await dashboardData();
+export default async function Today() {
+  const d = await todayData();
 
   if (!d.stravaConnected && !d.hasActivities) {
     return (
       <div className="card mx-auto mt-10 max-w-md text-center">
-        <h1 className="text-xl font-bold">Welcome 👋</h1>
-        <p className="mt-2 text-muted">Connect Strava to import your Garmin runs, then log SkiErg sessions from a photo.</p>
+        <h1 className="text-xl font-bold">Welcome</h1>
+        <p className="mt-2 text-muted">Connect Strava to import your runs, then run the Garmin sync for your recovery data.</p>
         <a href="/api/strava/connect" className="btn-primary mt-4">Connect with Strava</a>
       </div>
     );
   }
 
-  const tsb = d.today?.tsb ?? 0;
-  const acwrTone = d.acwr === null ? undefined : d.acwr > 1.5 ? "var(--bad)" : d.acwr > 1.3 || d.acwr < 0.8 ? "var(--warn)" : "var(--good)";
-  const zoneTotal = d.zones.reduce((a, b) => a + b, 0);
-  const zoneColors = ["#94a3b8", "var(--c-run)", "var(--good)", "var(--warn)", "var(--bad)"];
+  const style = CALL_STYLE[d.call.call];
+  const hrv = d.metrics.find((m) => m.key === "hrv");
+  const get = (k: MetricStatus["key"]) => d.metrics.find((m) => m.key === k);
+  const p = d.plan;
+  const max = Math.max(p.target.high * 1.15, p.weekSoFar, 1);
+  const pct = (x: number) => `${Math.min(100, (x / max) * 100)}%`;
+  const dateLabel = new Date().toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: process.env.APP_TIMEZONE || "UTC" });
 
   return (
-    <div className="space-y-4">
+    <div className="mx-auto max-w-xl space-y-3.5">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Today</h1>
-          <p className="text-sm text-muted">{d.lastSync ? `Synced ${new Date(d.lastSync).toLocaleString()}` : "Not synced yet"}</p>
+          <h1 className="text-2xl font-extrabold">Today</h1>
+          <p className="text-sm text-muted">
+            {dateLabel}
+            {d.lastGarmin ? ` · Garmin ${new Date(d.lastGarmin).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}` : " · Garmin not synced"}
+          </p>
         </div>
         <div className="flex items-start gap-2">
           <SyncButton />
@@ -113,144 +74,89 @@ export default async function Dashboard() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-[1fr_1.4fr]">
-        <div className="card flex items-center gap-4">
-          <div className="relative">
-            <Ring score={d.readiness.score} color={LABEL_COLOR[d.readiness.label]} />
-            <div className="absolute inset-0 flex flex-col items-center justify-center">
-              <span className="tabular text-3xl font-bold">{d.readiness.score}</span>
-              <span className="text-xs font-semibold" style={{ color: LABEL_COLOR[d.readiness.label] }}>{d.readiness.label}</span>
-            </div>
-          </div>
-          <div className="min-w-0 flex-1 space-y-1">
-            <div className="label">Readiness today</div>
-            {d.readiness.factors.map((f) => (
-              <div key={f.name} className="flex justify-between gap-2 text-sm">
-                <span className="truncate text-muted">{f.name}</span>
-                <span className="tabular">{f.detail}</span>
-              </div>
-            ))}
-            {!d.checkedInToday && (
-              <Link href="/checkin" className="btn-primary mt-2 w-full text-sm">Morning check-in</Link>
-            )}
-          </div>
+      <section className="rounded-2xl border p-4" style={{ background: style.bg, borderColor: style.border }}>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <span className="rounded-full px-3 py-1 text-xs font-extrabold tracking-wider text-bg" style={{ background: style.text }}>{style.badge}</span>
+          <span className="text-sm text-muted">{d.call.reasons[0]}</span>
         </div>
-
-        <PlanCard plan={d.plan} />
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-[1fr_1.4fr]">
-        <Link href="/hyrox" className="card block transition hover:border-accent">
-          <div className="label">Predicted HYROX time</div>
-          <div className="tabular mt-1 text-4xl font-bold">{formatDuration(d.prediction.total)}</div>
-          <div className="tabular text-sm text-muted">range {formatDuration(d.prediction.low)} – {formatDuration(d.prediction.high)}</div>
-          {d.hyroxPb && (
-            <div className="tabular mt-1 text-sm">
-              Your best <b className="text-good">{formatDuration(d.hyroxPb.total)}</b> <span className="text-muted">({d.hyroxPb.date})</span>
-            </div>
-          )}
-          <div className="mt-2 text-xs text-muted">{Math.round(d.prediction.confidence * 100)}% from your own data · see breakdown →</div>
-        </Link>
-        <div className="card">
-          <div className="label mb-2">Today</div>
-          <ul className="space-y-2">
-            {d.cues.map((c) => (
-              <li key={c} className="flex gap-2 text-sm"><span className="text-accent">●</span>{c}</li>
-            ))}
+        <h2 className="mt-2 text-[22px] font-bold leading-tight">{d.call.headline}</h2>
+        <div className="mt-3 rounded-xl bg-bg p-3.5">
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted">Suggested</div>
+          <div className="mt-0.5 font-bold">{d.call.session}</div>
+        </div>
+        {d.call.reasons.length > 1 && (
+          <ul className="mt-2 space-y-0.5 text-sm text-muted">
+            {d.call.reasons.slice(1).map((r) => <li key={r}>· {r}</li>)}
           </ul>
-          {d.goal && (
-            <p className="mt-3 border-t border-border pt-3 text-sm text-muted">
-              <b className="text-text">{d.goal.daysTo} days</b> to {d.goal.name} ({d.goal.date})
-            </p>
-          )}
-        </div>
-      </div>
+        )}
+      </section>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Stat label="Fitness (CTL)" value={String(Math.round(d.today?.ctl ?? 0))} hint="42-day load" />
-        <Stat label="Fatigue (ATL)" value={String(Math.round(d.today?.atl ?? 0))} hint="7-day load" />
-        <Stat label="Form (TSB)" value={`${tsb > 0 ? "+" : ""}${Math.round(tsb)}`} hint={tsb < -25 ? "Very tired" : tsb < -10 ? "Productive fatigue" : tsb > 15 ? "Very fresh" : "Balanced"} tone={tsb < -25 ? "var(--bad)" : tsb > 5 ? "var(--good)" : undefined} />
-        <Stat label="Acute:Chronic" value={d.acwr?.toFixed(2) ?? "–"} hint="Sweet spot 0.8–1.3" tone={acwrTone} />
-      </div>
-
-      <div className="card">
-        <div className="label mb-2">Session mix — last 14 days</div>
-        <div className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
-          {d.plan.mix.map((m) => (
-            <div key={m.label} className="flex items-center justify-between gap-2 text-sm">
-              <span>{m.label}</span>
-              <span className="tabular flex items-center gap-2">
-                <b>{m.count}</b>
-                <span className="text-xs text-muted">aim {m.ideal[0]}–{m.ideal[1]}</span>
-                <span className="h-2 w-2 rounded-full" style={{ background: m.status === "ok" ? "var(--good)" : "var(--warn)" }} />
-              </span>
-            </div>
-          ))}
+      <section className="card">
+        <div className="flex items-baseline justify-between">
+          <div className="label">HRV · last 14 nights</div>
+          <div className="text-sm font-semibold" style={{ color: hrv?.status ? STATUS_COLOR[hrv.status] : "var(--muted)" }}>
+            {hrv?.status === "good" ? "Balanced" : hrv?.status === "ok" ? "Slightly low" : hrv?.status === "low" ? "Low" : ""}
+          </div>
         </div>
-      </div>
-
-      <div className="card">
-        <div className="label mb-2">Fitness · Fatigue · Form — last 90 days</div>
-        <PmcChart data={d.pmc} />
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="card">
-          <div className="label mb-2">Weekly load by sport</div>
-          <WeeklyLoadChart data={d.weekly} />
+        <div className="mt-1 flex items-baseline gap-2">
+          <span className="tabular text-3xl font-extrabold">{hrv?.today ?? "–"}</span>
+          <span className="text-sm text-muted">ms last night{hrv?.range ? ` · normal ${hrv.range[0]}–${hrv.range[1]}` : ""}</span>
         </div>
-        <div className="card">
-          <div className="label mb-2">Intensity split — last 28 days (HR zones)</div>
-          {zoneTotal > 0 ? (
-            <>
-              <div className="flex h-4 overflow-hidden rounded-full">
-                {d.zones.map((z, i) => (
-                  <div key={i} style={{ width: `${(z / zoneTotal) * 100}%`, background: zoneColors[i] }} />
-                ))}
-              </div>
-              <div className="mt-3 space-y-1">
-                {d.zones.map((z, i) => (
-                  <div key={i} className="flex justify-between text-sm">
-                    <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full" style={{ background: zoneColors[i] }} />{HR_ZONE_NAMES[i]}</span>
-                    <span className="tabular text-muted">{Math.floor(z / 60)}h {z % 60}m · {Math.round((z / zoneTotal) * 100)}%</span>
-                  </div>
-                ))}
-              </div>
-              <p className="mt-2 text-xs text-muted">Polarised target: ~80% in Z1–Z2.</p>
-            </>
-          ) : (
-            <p className="text-sm text-muted">Sync activities with heart rate to see your zone split.</p>
-          )}
+        <div className="mt-2">
+          <BandSparkline points={hrv?.series.map((x) => x.value) ?? []} band={hrv?.range ?? null} label="Overnight HRV for the last 14 nights with your normal range shaded" />
         </div>
-      </div>
+      </section>
 
-      {d.wellness.length > 1 && (
-        <div className="card">
-          <div className="label mb-2">Garmin wellness trend (from check-ins)</div>
-          <WellnessChart data={d.wellness} />
-        </div>
+      <div className="grid grid-cols-3 gap-2.5">
+        <Tile m={get("rhr")} suffix="bpm" />
+        <Tile m={get("sleep")} />
+        <Tile m={get("bodyBattery")} />
+      </div>
+      {!d.hasCheckin && (
+        <p className="text-center text-xs text-muted">
+          No recovery data for today yet — run <code>npm run garmin</code>, or <Link href="/checkin" className="text-accent">enter it by hand</Link>.
+        </p>
       )}
 
-      <div className="card">
-        <div className="mb-2 flex items-center justify-between">
-          <div className="label">Recent sessions</div>
-          <Link href="/calendar" className="text-sm text-accent">Calendar</Link>
+      <section className="card space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="label">This week</div>
+          <span className="rounded-full px-2.5 py-1 text-xs font-bold" style={{ background: "color-mix(in srgb, var(--c-run) 18%, transparent)", color: "var(--c-run)" }}>{VERDICT[p.verdict]}</span>
         </div>
-        <ul className="divide-y divide-border">
-          {d.recent.map((a) => (
-            <li key={a.id} className="flex items-center justify-between gap-3 py-2 text-sm">
-              <div className="min-w-0">
-                <Link href={`/session/${a.id}`} className="block truncate font-medium hover:text-accent">{a.name}</Link>
-                <div className="text-xs text-muted">{localDate(a.start_time)} · {a.sport} · {formatDuration(a.moving_s ?? a.duration_s)}</div>
-              </div>
-              <div className="tabular shrink-0 text-right">
-                <div className="font-semibold">{Math.round(a.load ?? 0)}</div>
-                <div className="text-xs text-muted">load</div>
-              </div>
-            </li>
+        <p className="text-[15px] leading-snug">{p.reasons[0] ?? p.headline}</p>
+        <div>
+          <div className="flex justify-between text-xs text-muted">
+            <span>Load so far <b className="tabular text-text">{p.weekSoFar}</b></span>
+            <span className="tabular">target {p.target.low}–{p.target.high} · {p.daysLeft} day{p.daysLeft === 1 ? "" : "s"} left</span>
+          </div>
+          <div className="relative mt-1.5 h-2.5 rounded-full bg-border">
+            <div className="absolute inset-y-0 rounded-full opacity-30" style={{ left: pct(p.target.low), width: `calc(${pct(p.target.high)} - ${pct(p.target.low)})`, background: "var(--c-run)" }} />
+            <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: pct(p.weekSoFar), background: "var(--c-run)" }} />
+          </div>
+        </div>
+        {p.suggestions.slice(0, 2).map((s) => (
+          <div key={s.session} className="flex gap-2.5 rounded-xl bg-bg px-3 py-2.5">
+            <span className="w-3 font-extrabold" style={{ color: "var(--c-run)" }}>{ACTION_ICON[s.action]}</span>
+            <div>
+              <div className="text-sm font-semibold">{s.session}</div>
+              <div className="text-xs text-muted">{s.why}</div>
+            </div>
+          </div>
+        ))}
+        <div className="flex flex-wrap gap-1.5 text-xs">
+          {p.mix.map((m) => (
+            <span key={m.label} className="tabular rounded-full border px-2.5 py-1" style={{ borderColor: m.status === "low" ? "var(--warn)" : "var(--border)" }}>
+              {m.label.replace(/ \(.*\)$/, "")} {m.label.startsWith("Easy share") ? `${m.count}%` : `${m.count}`}
+            </span>
           ))}
-        </ul>
-      </div>
+        </div>
+        <p className="text-[11px] text-muted">Session counts are for the last 14 days.</p>
+        {d.goal && (
+          <p className="border-t border-border pt-2 text-sm text-muted">
+            <b className="text-text">{d.goal.daysTo} days</b> to {d.goal.name}
+          </p>
+        )}
+      </section>
     </div>
   );
 }

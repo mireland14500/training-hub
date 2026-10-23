@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import Nav from "@/components/Nav";
+import { getAthlete } from "@/lib/db";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -19,11 +20,19 @@ export const viewport: Viewport = {
   ],
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+async function showPredictions(): Promise<boolean> {
+  try {
+    return (await getAthlete()).show_predictions ?? false;
+  } catch {
+    return false; // not set up yet (or signed out): the plain navigation
+  }
+}
+
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body className="min-h-dvh">
-        <Nav />
+        <Nav showPredictions={await showPredictions()} />
         <main className="mx-auto max-w-5xl px-4 pb-28 pt-4 md:pb-10 md:pt-20">{children}</main>
       </body>
     </html>

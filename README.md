@@ -1,10 +1,21 @@
 # Training Hub
 
-A personal HYROX training analyser for phone and desktop. It answers three questions:
+A personal training app for phone and desktop, focused on **recovery and running faster**. It has three tabs:
 
-1. **Am I getting fitter?** The Progress page tracks predicted HYROX time, threshold pace, VDOT, training fitness, easy-run efficiency, SkiErg and Row 1 km times, and station benchmarks. It shows the change over the last 6 and 12 weeks and gives an overall verdict.
-2. **What would my HYROX time be?** The HYROX page predicts your finish time segment by segment and ranks where you'd gain the most time.
-3. **Should I train more or less this week?** The Today page gives weekly advice (**ADD / HOLD / REDUCE / DELOAD / TAPER**). It's based on training load, fatigue, readiness and days to your race. It also gives a weekly load target, checks your session mix (runs, quality runs, strength/stations, sims, ergs) and suggests which session to add or drop.
+- **Today:**
+  - A **Push / Easy / Rest** call for the day, with a suggested session. It's based on your Garmin HRV, resting HR, sleep, Body Battery and readiness, each compared with your own last 4 weeks, plus your training load and recent hard days.
+  - Your HRV over 14 nights, with your normal range shaded.
+  - **This week:** add a session, hold, ease off, take a lighter week, build back or taper, with a load target and the specific session to add. It aims for about 80% easy running, 1–2 quality runs and a long run.
+- **Calendar:** every session, including gym classes. Set what a session really was and add the exercises (from a whiteboard photo or by hand). "Same as last week?" fills repeating classes in one tap, and you can mark days off when you're ill or away.
+- **Running:**
+  - Your **easy pace at a fixed heart rate**, week by week. It's the clearest sign your aerobic fitness is improving.
+  - Garmin's lactate threshold and VO2max.
+  - Weekly km.
+  - Best efforts for the last 90 days vs the 90 before.
+  - Recent quality-session paces.
+  - Your training paces.
+
+HYROX race predictions and the Progress page are still there. Switch them on in **Settings → HYROX → Show HYROX predictions & Progress**.
 
 Data comes from:
 - Your Garmin, through Strava.
