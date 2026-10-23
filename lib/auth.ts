@@ -28,8 +28,14 @@ export async function verifySessionToken(token: string | undefined): Promise<boo
   return diff === 0;
 }
 
+/** Stray spaces/newlines and wrapping quotes are easy to paste into a hosting dashboard. */
+function clean(v: string): string {
+  return v.trim().replace(/^(["'])(.*)\1$/, "$2");
+}
+
 export function passwordMatches(input: string): boolean {
-  const pw = process.env.APP_PASSWORD;
+  const pw = clean(process.env.APP_PASSWORD ?? "");
+  input = input.trim();
   if (!pw) return false;
   if (input.length !== pw.length) return false;
   let diff = 0;
