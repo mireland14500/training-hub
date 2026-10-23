@@ -78,6 +78,12 @@ create table if not exists activities (
   linked_activity_id uuid references activities (id) on delete set null,
   excluded boolean not null default false, -- true when merged into a logged session
   trainer boolean not null default false,  -- treadmill/indoor: distance unreliable for best efforts
+  -- What the session actually was (overrides Strava's sport, e.g. a "HIIT" class that was threshold work):
+  -- easy | long | threshold | intervals | hyrox | strength | recovery | race
+  focus text,
+  -- What you did, entered by hand or read from a photo: [{ exercise, sets, distance_m, reps, time_s,
+  -- speed_kmh, incline_pct, weight_kg, notes }] — see lib/workout.ts
+  entries jsonb,
   notes text,
   created_at timestamptz default now()
 );
@@ -121,6 +127,8 @@ alter table athlete add column if not exists garmin_lt_date date;
 alter table athlete add column if not exists garmin_vo2max numeric;
 alter table athlete add column if not exists garmin_synced_at timestamptz;
 alter table activities add column if not exists trainer boolean not null default false;
+alter table activities add column if not exists focus text;
+alter table activities add column if not exists entries jsonb;
 
 alter table strava_auth enable row level security;
 alter table athlete enable row level security;
@@ -128,7 +136,7 @@ alter table activities enable row level security;
 alter table checkins enable row level security;
 alter table benchmarks enable row level security;
 
--- Private bucket for SkiErg monitor photos.
+-- Private bucket for workout photos (erg monitors, whiteboards, results).
 insert into storage.buckets (id, name, public)
 values ('ski-photos', 'ski-photos', false)
 on conflict do nothing;

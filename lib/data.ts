@@ -29,9 +29,11 @@ import {
   type ErgSession,
   type HyroxSession,
   type HyroxSplits,
+  type Benchmark,
   type Prediction,
 } from "./hyrox";
 import { categorize, weeklyPlan, type SessionSummary } from "./plan";
+import { addEntryVolumes, benchmarksFromEntries, emptyVolumes, entryTags, ergSessionsFromEntries, summarize, type Volumes } from "./workout";
 import { isRun } from "./strava";
 
 const TZ = process.env.APP_TIMEZONE || "UTC";
@@ -82,17 +84,25 @@ export async function getBenchmarks(sinceDays: number): Promise<BenchmarkRow[]> 
 export const ERG_SPORTS = ["SkiErg", "RowErg", "BikeErg"] as const;
 const ROW_SPORTS = ["RowErg", "VirtualRow", "Rowing"];
 
-export function sportGroup(sport: string, name: string | null = null): "Run" | "Erg" | "HYROX & strength" | "Other" {
-  const c = categorize(sport, name);
+export function sportGroup(a: Pick<ActivityRow, "sport" | "name" | "focus" | "entries">): "Run" | "Erg" | "HYROX & strength" | "Other" {
+  const c = categorize(a.sport, a.name, a.focus, a.entries);
   if (c === "run") return "Run";
   if (c === "erg") return "Erg";
   if (c === "hyrox" || c === "strength") return "HYROX & strength";
   return "Other";
 }
 
-function isHardSession(a: ActivityRow): boolean {
+const HARD_FOCUS = ["threshold", "intervals", "race"];
+
+export function isHardSession(a: ActivityRow): boolean {
   const z = a.zone_seconds;
-  return (z ? z[3] + z[4] >= 600 : false) || (a.load ?? 0) >= 100 || (a.rpe ?? 0) >= 8;
+  return (z ? z[3] + z[4] >= 600 : false) || (a.load ?? 0) >= 100 || (a.rpe ?? 0) >= 8 || HARD_FOCUS.includes(a.focus ?? "");
+}
+
+/** Structured hard work: your session type, HR time at threshold+, or a workout-style run name. */
+function isQualitySession(a: ActivityRow): boolean {
+  if (a.focus) return a.focus === "threshold" || a.focus === "intervals";
+  return isRun(a.sport) && (((a.zone_seconds?.[3] ?? 0) + (a.zone_seconds?.[4] ?? 0) >= 600) || /tempo|threshold|interval|reps|\d\s*[x×]\s*\d|fartlek|track/i.test(a.name ?? ""));
 }
 
 // ---------------------------------------------------------------------------
@@ -182,13 +192,22 @@ async function loadEverything(): Promise<Everything> {
   return { athlete, activities, benchmarks, checkins };
 }
 
-function ergSessions(activities: ActivityRow[], sports: string[]): ErgSession[] {
-  return activities
+function ergSessions(activities: ActivityRow[], sports: string[], machine: "ski" | "row"): ErgSession[] {
+  const whole = activities
     .filter((a) => sports.includes(a.sport) && a.distance_m && a.duration_s)
     .map((a) => {
       const workout = String((a.details as { workout?: string } | null)?.workout ?? a.name ?? "");
       return { date: localDate(a.start_time), distance_m: a.distance_m!, time_s: a.moving_s ?? a.duration_s, intervals: /\d\s*[x×]\s*\d/i.test(workout) };
     });
+  // Pieces logged inside other sessions (e.g. a class with a 1 km ski).
+  const inside = activities.flatMap((a) => (a.entries?.length ? ergSessionsFromEntries(localDate(a.start_time), a.entries, machine) : []));
+  return [...whole, ...inside];
+}
+
+/** Benchmarks you logged, plus big-enough station efforts inside sessions. */
+function allBenchmarks(e: Everything): Benchmark[] {
+  const inside = e.activities.flatMap((a) => (a.entries?.length ? benchmarksFromEntries(localDate(a.start_time), a.entries) : []));
+  return [...e.benchmarks, ...inside];
 }
 
 function hyroxSessions(e: Everything, runs: ActivityRow[]): HyroxSession[] {
@@ -207,9 +226,9 @@ function predictAt(e: Everything, runs: ActivityRow[], sims: HyroxSession[], dat
     division: e.athlete.hyrox_division as Division,
     asOf: date,
     tenKPace: vdot ? predictTime(vdot, 10000) / 10 : null,
-    skiSessions: ergSessions(e.activities, ["SkiErg"]),
-    rowSessions: ergSessions(e.activities, ROW_SPORTS),
-    benchmarks: e.benchmarks,
+    skiSessions: ergSessions(e.activities, ["SkiErg"], "ski"),
+    rowSessions: ergSessions(e.activities, ROW_SPORTS, "row"),
+    benchmarks: allBenchmarks(e),
     hyroxSessions: sims,
   });
 }
@@ -279,11 +298,12 @@ export async function dashboardData() {
     .filter((a) => localDate(a.start_time) >= daysAgo(34))
     .map((a) => ({
       date: localDate(a.start_time),
-      category: categorize(a.sport, a.name),
+      category: categorize(a.sport, a.name, a.focus, a.entries),
       load: a.load ?? 0,
       durationS: a.moving_s ?? a.duration_s,
       hard: isHardSession(a),
-      quality: isRun(a.sport) && (((a.zone_seconds?.[3] ?? 0) + (a.zone_seconds?.[4] ?? 0) >= 600) || /tempo|threshold|interval|reps|\d\s*[x×]\s*\d|fartlek|track/i.test(a.name ?? "")),
+      quality: isQualitySession(a),
+      tags: entryTags(a.entries),
     }));
 
   const plan = weeklyPlan({
@@ -305,7 +325,7 @@ export async function dashboardData() {
   for (let i = 11; i >= 0; i--) weeks.set(weekStart(daysAgo(i * 7)), Object.fromEntries(groups.map((g) => [g, 0])));
   for (const a of counted) {
     const w = weeks.get(weekStart(localDate(a.start_time)));
-    if (w) w[sportGroup(a.sport, a.name)] += a.load ?? 0;
+    if (w) w[sportGroup(a)] += a.load ?? 0;
   }
 
   return {
@@ -392,8 +412,8 @@ export async function progressData() {
   const runs = e.activities.filter((a) => isRun(a.sport));
   const sims = hyroxSessions(e, runs);
   const series: PmcPoint[] = pmc(dailyLoads(e.activities), daysAgo(449), today());
-  const ski = ergSessions(e.activities, ["SkiErg"]);
-  const row = ergSessions(e.activities, ROW_SPORTS);
+  const ski = ergSessions(e.activities, ["SkiErg"], "ski");
+  const row = ergSessions(e.activities, ROW_SPORTS, "row");
 
   // Snapshot every 2 weeks for the last 26 weeks.
   const dates = Array.from({ length: 14 }, (_, i) => daysAgo((13 - i) * 14));
@@ -431,7 +451,7 @@ export async function progressData() {
   // Station benchmarks: race-equivalent times, first vs latest.
   const division = e.athlete.hyrox_division as Division;
   const stations = STATIONS.map((st) => {
-    const list = e.benchmarks
+    const list = allBenchmarks(e)
       .filter((b) => b.station === st.key)
       .map((b) => ({ date: b.date, time: Math.round(benchmarkToRace(b, division)) }))
       .sort((a, b) => (a.date < b.date ? -1 : 1));
@@ -566,4 +586,161 @@ export async function linkCandidates(): Promise<{ id: string; label: string }[]>
       id: a.id,
       label: `${localDate(a.start_time)} · ${a.name} · ${formatDuration(a.duration_s)}${a.avg_hr ? ` · ${Math.round(a.avg_hr)} bpm` : ""}`,
     }));
+}
+
+// ---------------------------------------------------------------------------
+// Calendar
+// ---------------------------------------------------------------------------
+
+export interface CalendarSession {
+  id: string;
+  name: string;
+  sport: string;
+  category: ReturnType<typeof categorize>;
+  focus: string | null;
+  durationS: number;
+  load: number;
+  distanceM: number | null;
+  avgHr: number | null;
+  summary: string;
+  hasPhoto: boolean;
+  hasDetails: boolean;
+  excluded: boolean;
+  hard: boolean;
+}
+
+function toCalendarSession(a: ActivityRow): CalendarSession {
+  return {
+    id: a.id,
+    name: a.name ?? a.sport,
+    sport: a.sport,
+    category: categorize(a.sport, a.name, a.focus, a.entries),
+    focus: a.focus,
+    durationS: a.moving_s ?? a.duration_s,
+    load: Math.round(a.load ?? 0),
+    distanceM: a.distance_m,
+    avgHr: a.avg_hr,
+    summary: summarize(a.entries),
+    hasPhoto: !!a.photo_path,
+    hasDetails: !!a.entries?.length,
+    excluded: a.excluded,
+    hard: isHardSession(a),
+  };
+}
+
+/** Distance-type volumes for a set of sessions: Strava/erg distances plus logged details. */
+function weekVolumes(activities: ActivityRow[]): Volumes {
+  const v = emptyVolumes();
+  for (const a of activities) {
+    if (a.excluded) continue;
+    if (isRun(a.sport) && a.distance_m) v.runKm += a.distance_m / 1000;
+    if (a.sport === "SkiErg" && a.distance_m) v.skiM += a.distance_m;
+    if (ROW_SPORTS.includes(a.sport) && a.distance_m) v.rowM += a.distance_m;
+    if (a.sport === "BikeErg" && a.distance_m) v.bikeKm += a.distance_m / 1000;
+    if (a.sport === "HYROX" && a.details) {
+      const sp = a.details as unknown as HyroxSplits;
+      v.runKm += (sp.runs ?? []).filter((r) => r).length;
+      const st = sp.stations ?? {};
+      if (st.ski) v.skiM += 1000;
+      if (st.row) v.rowM += 1000;
+      v.sledM += (st.sled_push ? 50 : 0) + (st.sled_pull ? 50 : 0);
+      if (st.wall_balls) v.wallBalls += 100;
+      if (st.lunges) v.lungesM += 100;
+      if (st.bbj) v.bbjM += 80;
+      if (st.farmers) v.carryM += 200;
+    }
+    if (a.entries?.length) addEntryVolumes(v, a.entries);
+  }
+  return v;
+}
+
+/** One week (Monday start) plus a month overview around it. */
+export async function calendarData(weekParam?: string) {
+  const ref = weekParam && /^\d{4}-\d{2}-\d{2}$/.test(weekParam) ? weekParam : today();
+  const monday = weekStart(ref);
+  const sunday = shift(monday, 6);
+
+  // Month overview: the month that contains most of this week (its Thursday).
+  const thursday = shift(monday, 3);
+  const monthStart = thursday.slice(0, 8) + "01";
+  const gridStart = weekStart(monthStart);
+  const nextMonth = new Date(monthStart + "T00:00:00Z");
+  nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1);
+  const monthEnd = shift(nextMonth.toISOString().slice(0, 10), -1);
+  const gridEnd = shift(weekStart(monthEnd), 6);
+
+  const from = gridStart < monday ? gridStart : monday;
+  const to = gridEnd > sunday ? gridEnd : sunday;
+  const [{ data, error }, checkins] = await Promise.all([
+    db()
+      .from("activities")
+      .select("*")
+      .gte("start_time", new Date(Date.parse(from + "T00:00:00Z") - 86400000).toISOString())
+      .lte("start_time", new Date(Date.parse(to + "T00:00:00Z") + 2 * 86400000).toISOString())
+      .order("start_time"),
+    db().from("checkins").select("*").gte("date", monday).lte("date", sunday),
+  ]);
+  if (error) throw error;
+  const acts = (data as ActivityRow[]).map((a) => ({ a, date: localDate(a.start_time) })).filter((x) => x.date >= from && x.date <= to);
+
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const date = shift(monday, i);
+    const c = ((checkins.data ?? []) as CheckinRow[]).find((x) => x.date === date) ?? null;
+    return {
+      date,
+      sessions: acts.filter((x) => x.date === date).map((x) => toCalendarSession(x.a)),
+      checkin: c ? { hrv: c.hrv_ms, sleep: c.sleep_score, bodyBattery: c.body_battery } : null,
+    };
+  });
+
+  const weekActs = acts.filter((x) => x.date >= monday && x.date <= sunday).map((x) => x.a);
+  const counted = weekActs.filter((a) => !a.excluded);
+  const byCategory: Record<string, number> = {};
+  for (const a of counted) {
+    const c = categorize(a.sport, a.name, a.focus, a.entries);
+    byCategory[c] = (byCategory[c] ?? 0) + (a.moving_s ?? a.duration_s);
+  }
+
+  const month: { date: string; inMonth: boolean; categories: string[]; load: number }[][] = [];
+  for (let d = gridStart; d <= gridEnd; d = shift(d, 7)) {
+    month.push(
+      Array.from({ length: 7 }, (_, i) => {
+        const date = shift(d, i);
+        const list = acts.filter((x) => x.date === date && !x.a.excluded);
+        return {
+          date,
+          inMonth: date >= monthStart && date <= monthEnd,
+          categories: list.map((x) => categorize(x.a.sport, x.a.name, x.a.focus, x.a.entries)),
+          load: Math.round(list.reduce((s, x) => s + (x.a.load ?? 0), 0)),
+        };
+      }),
+    );
+  }
+
+  return {
+    monday,
+    sunday,
+    today: today(),
+    prevWeek: shift(monday, -7),
+    nextWeek: shift(monday, 7),
+    monthLabel: new Date(monthStart + "T00:00:00Z").toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" }),
+    prevMonth: weekStart(shift(monthStart, -1).slice(0, 8) + "01"),
+    nextMonth: weekStart(nextMonth.toISOString().slice(0, 10)),
+    days,
+    month,
+    summary: {
+      load: Math.round(counted.reduce((s, a) => s + (a.load ?? 0), 0)),
+      sessions: counted.length,
+      hours: counted.reduce((s, a) => s + (a.moving_s ?? a.duration_s), 0) / 3600,
+      hard: counted.filter(isHardSession).length,
+      needsDetails: counted.filter((a) => !a.entries?.length && !isRun(a.sport) && !ERG_SPORTS.includes(a.sport as (typeof ERG_SPORTS)[number]) && a.sport !== "HYROX").length,
+      byCategory,
+      volumes: weekVolumes(weekActs),
+    },
+  };
+}
+
+export async function getActivity(id: string): Promise<ActivityRow | null> {
+  const { data } = await db().from("activities").select("*").eq("id", id).maybeSingle();
+  return (data as ActivityRow) ?? null;
 }

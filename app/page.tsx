@@ -227,13 +227,13 @@ export default async function Dashboard() {
       <div className="card">
         <div className="mb-2 flex items-center justify-between">
           <div className="label">Recent sessions</div>
-          <Link href="/activities" className="text-sm text-accent">All</Link>
+          <Link href="/calendar" className="text-sm text-accent">Calendar</Link>
         </div>
         <ul className="divide-y divide-border">
           {d.recent.map((a) => (
             <li key={a.id} className="flex items-center justify-between gap-3 py-2 text-sm">
               <div className="min-w-0">
-                <div className="truncate font-medium">{a.name}</div>
+                <Link href={`/session/${a.id}`} className="block truncate font-medium hover:text-accent">{a.name}</Link>
                 <div className="text-xs text-muted">{localDate(a.start_time)} · {a.sport} · {formatDuration(a.moving_s ?? a.duration_s)}</div>
               </div>
               <div className="tabular shrink-0 text-right">

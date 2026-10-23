@@ -15,6 +15,21 @@ Data comes from:
 
 It's a **Progressive Web App (PWA)**: open the URL on your phone and choose *Add to Home Screen* to get it as an app.
 
+## Calendar and session details
+
+The **Calendar** tab shows each week (Monday–Sunday), a month overview, and a week summary. The summary has total load, sessions, hours, hard sessions, time by type, and volumes: running km including treadmill, SkiErg/Row metres, sled metres, wall-ball reps and more.
+
+Tap any session to tell the app what it really was. This is useful for gym classes that Garmin/Strava records as "HIIT":
+- **Session type:** Easy, Long, Threshold, Intervals, HYROX, Strength, Recovery or Race. This replaces Strava's label in the analysis.
+- **RPE.** It's used for load when the session has no heart rate.
+- **What you did:** take a photo of the whiteboard or screen (Claude reads it into rows) or add rows by hand. Each row is ski, treadmill, run, row, bike, sled push/pull, wall balls, lunges, burpees, carries or other, with sets, metres or reps, time per set, treadmill speed/incline and weight. Paces are worked out as you type.
+
+**+ Add** on any day logs a class that isn't on Strava.
+
+How session details feed the analysis:
+- **Weekly plan and session mix:** a "HIIT" class with treadmill reps counts as a run, with Threshold or Intervals making it a quality session. Ski/row rows count as erg work, and station rows as station work.
+- **HYROX prediction:** a single ski/row piece (e.g. 1 × 1000 m) counts like an erg log. A station effort of at least half the race distance or reps (e.g. 50 wall balls in one go) counts as a benchmark. If the session also had running, it's treated as done "after running".
+
 ## How the data flows
 
 ```
@@ -143,7 +158,7 @@ When you can add a session, the app suggests the most useful one, in this order:
 
 ## Project layout
 ```
-app/                pages (Today, HYROX, Progress, Running, Log, Ergs, Settings, Check-in) and API routes
+app/                pages (Today, Calendar, Session editor, HYROX, Progress, Running, Log, Ergs, Settings, Check-in) and API routes
 app/actions.ts      server actions (save check-in, settings, ski sessions)
 lib/analysis.ts     all training-science maths (pure functions, unit tested)
 lib/data.ts         loads and aggregates data for each page
@@ -151,6 +166,7 @@ lib/strava.ts       Strava OAuth and API client
 lib/sync.ts         import, stream analysis, webhook handling
 lib/hyrox.ts        HYROX race model and prediction (pure, unit tested)
 lib/plan.ts         weekly add/hold/reduce advice (pure, unit tested)
+lib/workout.ts      exercises inside a session: paces, volumes, feeding the analysis (pure, unit tested)
 scripts/garmin_sync.py  imports recovery data and lactate threshold from Garmin Connect
 lib/vision.ts       reads erg monitors and HYROX result screenshots with Claude
 supabase/schema.sql database schema

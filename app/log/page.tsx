@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { DeleteButton, RpeSelect } from "@/components/ActivityControls";
+import { CATEGORY_COLOR as CATEGORY_DOT } from "@/components/categories";
 import { formatDuration, formatPace } from "@/lib/analysis";
 import { getActivities, localDate } from "@/lib/data";
 import { categorize } from "@/lib/plan";
@@ -8,12 +9,12 @@ import { isRun } from "@/lib/strava";
 export const dynamic = "force-dynamic";
 
 const METHOD: Record<string, string> = { hr: "heart rate", rpe: "RPE", strava: "Strava effort", duration: "duration only" };
-const CATEGORY_DOT: Record<string, string> = { run: "var(--c-run)", erg: "var(--c-ski)", hyrox: "var(--accent)", strength: "var(--c-ride)", other: "var(--c-other)" };
 
 const ACTIONS = [
   { href: "/log/erg", title: "Erg session", text: "Photo of the SkiErg / RowErg / BikeErg monitor", icon: "📷" },
   { href: "/log/hyrox", title: "HYROX sim or race", text: "Splits by hand or from a results screenshot", icon: "🏁" },
   { href: "/log/station", title: "Station benchmark", text: "Timed sled, wall balls, lunges, carries…", icon: "⏱️" },
+  { href: "/session/new", title: "Class / workout", text: "HIIT, gym class, strength — photo or by hand", icon: "🏋️" },
   { href: "/checkin", title: "Morning check-in", text: "HRV, sleep, Body Battery from Garmin", icon: "🌅" },
 ];
 
@@ -22,7 +23,7 @@ export default async function Log() {
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold">Log</h1>
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
         {ACTIONS.map((a) => (
           <Link key={a.href} href={a.href} className="card block transition hover:border-accent">
             <div className="text-2xl">{a.icon}</div>
@@ -43,9 +44,9 @@ export default async function Log() {
         <ul className="divide-y divide-border">
           {activities.map((a) => (
             <li key={a.id} className={`flex items-center gap-3 px-4 py-3 text-sm ${a.excluded ? "opacity-50" : ""}`}>
-              <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: CATEGORY_DOT[categorize(a.sport, a.name)] }} />
+              <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: CATEGORY_DOT[categorize(a.sport, a.name, a.focus, a.entries)] }} />
               <div className="min-w-0 flex-1">
-                <div className="truncate font-medium">{a.name}</div>
+                <Link href={`/session/${a.id}`} className="block truncate font-medium hover:text-accent">{a.name}</Link>
                 <div className="tabular text-xs text-muted">
                   {localDate(a.start_time)} · {a.sport} · {formatDuration(a.moving_s ?? a.duration_s)}
                   {a.distance_m ? ` · ${(a.distance_m / 1000).toFixed(2)} km` : ""}

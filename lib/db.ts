@@ -44,6 +44,8 @@ export interface ActivityRow {
   linked_activity_id: string | null;
   excluded: boolean;
   trainer: boolean;
+  focus: string | null;
+  entries: import("./workout").Entry[] | null;
   notes: string | null;
 }
 

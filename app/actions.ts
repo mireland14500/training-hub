@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { pace500FromWatts, sessionLoad } from "@/lib/analysis";
 import { db, getAthlete } from "@/lib/db";
+import { localDate } from "@/lib/data";
+import { sanitizeEntries } from "@/lib/workout";
 import { recomputeLoads, resetRunAnalysis } from "@/lib/sync";
 
 function num(form: FormData, key: string): number | null {
@@ -237,4 +239,74 @@ export async function reanalyseRuns() {
   await resetRunAnalysis();
   revalidatePath("/", "layout");
   redirect("/settings?reanalyse=1");
+}
+
+const FOCUS_KEYS = ["easy", "long", "threshold", "intervals", "hyrox", "strength", "recovery", "race"];
+
+/**
+ * Saves a session from the calendar editor: what it actually was (focus), RPE, photo and
+ * the exercises done. Creates a manual session when there's no id (e.g. a class not recorded).
+ */
+export async function saveSession(form: FormData) {
+  const athlete = await getAthlete();
+  const id = str(form, "id");
+  let entries: unknown = [];
+  try {
+    entries = JSON.parse(String(form.get("entries") ?? "[]"));
+  } catch {}
+  const focusRaw = str(form, "focus");
+  const fields: Record<string, unknown> = {
+    name: str(form, "name"),
+    focus: focusRaw && FOCUS_KEYS.includes(focusRaw) ? focusRaw : null,
+    rpe: num(form, "rpe"),
+    notes: str(form, "notes"),
+    entries: sanitizeEntries(entries),
+  };
+  const photo = str(form, "photo_path");
+  if (photo) fields.photo_path = photo;
+
+  let startTime: string;
+  if (id) {
+    const { data: a } = await db().from("activities").select("start_time, duration_s, moving_s, avg_hr, suffer_score, name").eq("id", id).single();
+    if (!a) throw new Error("Session not found");
+    fields.name ??= a.name;
+    const { load, method } = sessionLoad(
+      { duration_s: a.moving_s || a.duration_s, avg_hr: a.avg_hr, rpe: fields.rpe as number | null, suffer_score: a.suffer_score },
+      athlete,
+    );
+    const { error } = await db().from("activities").update({ ...fields, load, load_method: method }).eq("id", id);
+    if (error) throw error;
+    startTime = a.start_time;
+  } else {
+    const durationS = duration(form, "duration");
+    if (!durationS) throw new Error("Enter how long the session took");
+    startTime = str(form, "start_iso") ?? new Date().toISOString();
+    const avgHr = num(form, "avg_hr");
+    const { load, method } = sessionLoad({ duration_s: durationS, avg_hr: avgHr, rpe: fields.rpe as number | null }, athlete);
+    const { error } = await db().from("activities").insert({
+      ...fields,
+      name: fields.name ?? "Workout",
+      source: photo ? "ski_photo" : "manual",
+      sport: "Workout",
+      start_time: startTime,
+      duration_s: Math.round(durationS),
+      moving_s: Math.round(durationS),
+      avg_hr: avgHr,
+      load,
+      load_method: method,
+      streams_fetched: true,
+    });
+    if (error) throw error;
+  }
+  revalidatePath("/", "layout");
+  redirect(`/calendar?week=${localDate(startTime)}`);
+}
+
+/** Deletes a session you logged yourself (Strava sessions are managed in Strava). */
+export async function deleteSession(form: FormData) {
+  const id = str(form, "id");
+  if (!id) return;
+  const { data } = await db().from("activities").select("start_time").eq("id", id).single();
+  await deleteActivity(id);
+  redirect(`/calendar${data ? `?week=${localDate(data.start_time)}` : ""}`);
 }

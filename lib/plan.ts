@@ -2,6 +2,7 @@
 // Pure functions — data loading lives in lib/data.ts.
 
 import type { PmcPoint } from "./analysis";
+import { entryTags, type Entry } from "./workout";
 
 export type Category = "run" | "erg" | "hyrox" | "strength" | "other";
 
@@ -9,10 +10,20 @@ const RUN = ["Run", "TrailRun", "VirtualRun"];
 const ERG = ["SkiErg", "RowErg", "BikeErg", "Rowing", "VirtualRow", "NordicSki"];
 const STRENGTH = ["WeightTraining", "Workout", "Crossfit", "HighIntensityIntervalTraining", "StairStepper"];
 
-export function categorize(sport: string, name: string | null): Category {
+/**
+ * Session category. Your own "session type" (focus) and the logged contents win over
+ * Strava's sport — e.g. a "HIIT" class that was ski + treadmill threshold reps is a run session.
+ */
+export function categorize(sport: string, name: string | null, focus?: string | null, entries?: Entry[] | null): Category {
+  if (focus === "hyrox" || focus === "race") return "hyrox";
+  if (focus === "strength") return "strength";
   if (sport === "HYROX" || /hyrox|\bsim\b|compromised|roxzone|wall ?balls?|sled/i.test(name ?? "")) return "hyrox";
   if (RUN.includes(sport)) return "run";
   if (ERG.includes(sport)) return "erg";
+  const tags = entryTags(entries);
+  if (tags.run) return "run";
+  if (tags.erg && !tags.station) return "erg";
+  if (tags.station) return "hyrox";
   if (STRENGTH.includes(sport)) return "strength";
   return "other";
 }
@@ -23,7 +34,9 @@ export interface SessionSummary {
   load: number;
   durationS: number;
   hard: boolean; // ≥10 min in Z4+, RPE ≥ 8, or load ≥ 100
-  quality: boolean; // structured hard run (tempo/threshold/intervals)
+  quality: boolean; // structured hard work (tempo/threshold/intervals)
+  /** What the session contained, from logged details (a class can be run + erg + stations). */
+  tags?: { run: boolean; erg: boolean; station: boolean };
 }
 
 export type Verdict = "taper" | "deload" | "reduce" | "maintain" | "add";
@@ -132,12 +145,12 @@ export function weeklyPlan(i: PlanInput): PlanAdvice {
   const since14 = addDays(i.today, -13);
   const last14 = i.sessions.filter((s) => s.date >= since14);
   const count = (f: (s: SessionSummary) => boolean) => last14.filter(f).length;
-  const runs = count((s) => s.category === "run");
-  const quality = count((s) => s.category === "run" && s.quality);
+  const runs = count((s) => s.category === "run" || !!s.tags?.run);
+  const quality = count((s) => s.quality && (s.category === "run" || !!s.tags?.run));
   const longRun = i.sessions.some((s) => s.category === "run" && s.durationS >= 75 * 60 && s.date >= addDays(i.today, -10));
-  const strength = count((s) => s.category === "strength");
+  const strength = count((s) => s.category === "strength" || (s.category !== "hyrox" && !!s.tags?.station));
   const hyrox = count((s) => s.category === "hyrox");
-  const ergs = count((s) => s.category === "erg");
+  const ergs = count((s) => s.category === "erg" || !!s.tags?.erg);
   const mixItem = (label: string, n: number, ideal: [number, number]): MixItem => ({ label, count: n, ideal, status: n < ideal[0] ? "low" : n > ideal[1] ? "high" : "ok" });
   const mix = [
     mixItem("Runs", runs, [5, 8]),

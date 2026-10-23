@@ -73,6 +73,45 @@ Extract each run split (Run 1–8), each station time, total Roxzone time and th
 Some results show cumulative times — convert those to individual segment times.
 Use null for anything not shown. Do not guess; mention unclear values in notes.`;
 
+// ---------------------------------------------------------------------------
+// Any workout: gym-class whiteboard, written plan, treadmill/erg screen, app screenshot
+// ---------------------------------------------------------------------------
+
+const WorkoutEntry = z.object({
+  exercise: z.enum(["run", "treadmill", "ski", "row", "bike", "sled_push", "sled_pull", "wall_balls", "lunges", "bbj", "farmers", "other"]),
+  name: z.string().nullable().describe('Exercise name as written, required for "other" (e.g. "KB swings")'),
+  sets: z.number().nullable().describe("Number of sets/rounds/reps of this block"),
+  distance_m: z.number().nullable().describe("Distance per set in metres"),
+  reps: z.number().nullable().describe("Repetitions per set (wall balls, burpees, strength moves)"),
+  time_s: z.number().nullable().describe("Time per set in seconds (or derived from a pace)"),
+  speed_kmh: z.number().nullable().describe("Treadmill speed in km/h"),
+  incline_pct: z.number().nullable().describe("Treadmill incline in %"),
+  weight_kg: z.number().nullable().describe("Load in kg (sled total, per-hand for carries, ball/bag weight)"),
+  notes: z.string().nullable().describe("Rest, effort cues, anything else for this block"),
+});
+
+export const WorkoutReading = z.object({
+  title: z.string().describe('Short name for the session, e.g. "Threshold class: ski + treadmill"'),
+  focus: z.enum(["easy", "long", "threshold", "intervals", "hyrox", "strength", "recovery", "race", "unknown"]),
+  duration_s: z.number().nullable().describe("Total session duration if shown"),
+  entries: z.array(WorkoutEntry).describe("One entry per block/exercise, in order"),
+  notes: z.string().describe("Anything unclear or not captured; empty string if none"),
+});
+export type WorkoutReading = z.infer<typeof WorkoutReading>;
+
+const WORKOUT_PROMPT = `This image shows a workout someone did — e.g. a gym class whiteboard, a written plan, a treadmill or erg screen, or an app screenshot.
+Turn it into a list of blocks. Exercise mapping:
+- run (outdoor/track), treadmill, ski (SkiErg), row (rower), bike (BikeErg/assault/echo bike)
+- sled_push, sled_pull, wall_balls, lunges (sandbag/walking lunges), bbj (burpee broad jumps / burpees), farmers (farmers/kettlebell carry)
+- other: anything else (name it, e.g. "KB swings", "Deadlift")
+Rules:
+- Values are PER SET. "4 × 500 m ski @ 1:50" → sets 4, distance_m 500, time_s 110 (1:50/500 m × 500 m).
+- Convert paces to time per set: /km paces × km, /500 m paces × (m/500). Times like "3:45" = 225 s.
+- Treadmill: speed in km/h (mph × 1.609), incline in %. If only speed and time are given, leave distance null.
+- Weights in kg (lb × 0.4536). Sled weight = total including the sled if that is what's written.
+- Pick the focus that best describes the session (threshold, intervals, hyrox, strength…), or "unknown".
+- Use null for anything not shown. Do not invent numbers; mention unclear items in notes.`;
+
 let client: Anthropic | null = null;
 
 async function readImage<T extends z.ZodType>(schema: T, prompt: string, imageBase64: string, mediaType: ImageType): Promise<z.infer<T>> {
@@ -105,4 +144,8 @@ export function readErgMonitor(imageBase64: string, mediaType: ImageType): Promi
 
 export function readHyroxResults(imageBase64: string, mediaType: ImageType): Promise<HyroxReading> {
   return readImage(HyroxReading, HYROX_PROMPT, imageBase64, mediaType);
+}
+
+export function readWorkout(imageBase64: string, mediaType: ImageType): Promise<WorkoutReading> {
+  return readImage(WorkoutReading, WORKOUT_PROMPT, imageBase64, mediaType);
 }
