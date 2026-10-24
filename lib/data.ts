@@ -36,6 +36,7 @@ import {
   type Prediction,
   simKind,
   SIM_NAME,
+  DOUBLES_NAME,
 } from "./hyrox";
 import { categorize, timeOffStatus, weeklyPlan, type SessionSummary, type TimeOff } from "./plan";
 import { recoveryStatus, todayCall, type RecoveryDay } from "./recovery";
@@ -376,6 +377,16 @@ export interface SimResult {
   fromStrava: boolean;
   /** You marked it yourself (vs picked up from the name). */
   marked: boolean;
+  /** Category it was done in: a doubles sim only feeds the doubles prediction. */
+  division: Division;
+}
+
+/** Your doubles category: the latest one you've raced or logged, else Doubles in your weights. */
+function doublesDivision(e: Everything): Division {
+  const raced = e.activities.find((a) => a.sport === "HYROX" && isDoubles(((a.details as unknown as HyroxSplits | null)?.division ?? "open_men") as Division));
+  const d = (raced?.details as unknown as HyroxSplits | null)?.division;
+  if (d) return d;
+  return String(e.athlete.hyrox_division).includes("women") ? "doubles_women" : "doubles_men";
 }
 
 /**
@@ -383,23 +394,30 @@ export interface SimResult {
  * plus sims logged here with splits. Full sims feed the prediction (singles only).
  */
 function simResults(e: Everything): SimResult[] {
+  const main = e.athlete.hyrox_division as Division;
+  const doubles = doublesDivision(e);
+  // Your choice, else the name ("doubles", "partner"…), else your main (singles) division.
+  const divisionOf = (a: ActivityRow): Division =>
+    a.sim_division && a.sim_division in DIVISIONS ? (a.sim_division as Division) : DOUBLES_NAME.test(a.name ?? "") ? doubles : main;
   const out: SimResult[] = [];
   for (const a of e.activities) {
     if (a.excluded || a.focus === "race" || a.sim_kind === "none") continue;
     const date = localDate(a.start_time);
     const total = a.sim_time_s || a.duration_s;
+    const base = { id: a.id, date, total, fromStrava: a.source === "strava" };
     if (a.sim_kind === "full" || a.sim_kind === "half") {
-      out.push({ id: a.id, date, name: a.name ?? "Sim", total, kind: a.sim_kind, fromStrava: a.source === "strava", marked: true });
+      out.push({ ...base, name: a.name ?? "Sim", kind: a.sim_kind, marked: true, division: divisionOf(a) });
       continue;
     }
     if (a.sport === "HYROX") {
-      const kind = (a.details as unknown as HyroxSplits | null)?.kind;
-      if (kind === "full_sim" || kind === "half_sim") out.push({ id: a.id, date, name: a.name ?? "HYROX sim", total, kind: kind === "full_sim" ? "full" : "half", fromStrava: false, marked: true });
+      const sp = a.details as unknown as HyroxSplits | null;
+      if (sp?.kind === "full_sim" || sp?.kind === "half_sim")
+        out.push({ ...base, name: a.name ?? "HYROX sim", kind: sp.kind === "full_sim" ? "full" : "half", marked: true, division: sp.division ?? main });
       continue;
     }
     // Elapsed time for a sim: the clock runs through the Roxzone.
     const kind = simKind(a.name, a.duration_s);
-    if (kind) out.push({ id: a.id, date, name: a.name ?? "Sim", total, kind, fromStrava: a.source === "strava", marked: false });
+    if (kind) out.push({ ...base, name: a.name ?? "Sim", kind, marked: false, division: divisionOf(a) });
   }
   // The same sim logged with splits and recorded on Strava: keep the logged one.
   return out
@@ -417,11 +435,22 @@ function possibleSims(e: Everything, sims: SimResult[]) {
     .slice(0, 10);
 }
 
-/** Today's singles prediction — used to show the before/after when you mark a sim. */
-export async function currentHyroxPrediction(): Promise<number> {
+/** Today's predictions by category — used to show the before/after when you mark a sim. */
+export async function currentHyroxPredictions(also: Division[] = []): Promise<Record<string, number>> {
   const e = await loadEverything();
   const runs = e.activities.filter((a) => isRun(a.sport));
-  return predictAt(e, runs, hyroxSessions(e, runs), today(), true).total;
+  const sims = hyroxSessions(e, runs);
+  const divisions = new Set<Division>([e.athlete.hyrox_division as Division, doublesDivision(e), ...simResults(e).map((s) => s.division), ...also]);
+  return Object.fromEntries([...divisions].map((d) => [d, predictAt(e, runs, sims, today(), true, d).total]));
+}
+
+/** Category a session's sim counts for, and your doubles category (for the sim control). */
+export async function simDivisions(a: ActivityRow): Promise<{ current: Division; main: Division; doubles: Division }> {
+  const e = await loadEverything();
+  const main = e.athlete.hyrox_division as Division;
+  const doubles = doublesDivision(e);
+  const current = a.sim_division && a.sim_division in DIVISIONS ? (a.sim_division as Division) : DOUBLES_NAME.test(a.name ?? "") ? doubles : main;
+  return { current, main, doubles };
 }
 
 /**
@@ -464,12 +493,10 @@ function predictAt(e: Everything, runs: ActivityRow[], sims: HyroxSession[], dat
     raceTotals: hyroxResults(e)
       .filter((r) => !r.hasSplits && r.division === div)
       .map((r) => ({ date: r.date, total: r.total, label: r.fromStrava ? "race on Strava" : "race" })),
-    // Sims are solo efforts, so they only speak for singles.
-    simTotals: doubles
-      ? []
-      : simResults(e)
-          .filter((s) => s.kind === "full")
-          .map((s) => ({ date: s.date, total: s.total, label: s.fromStrava ? `sim on Strava ("${s.name}")` : "logged full sim" })),
+    // Each sim only speaks for the category it was done in.
+    simTotals: simResults(e)
+      .filter((s) => s.kind === "full" && s.division === div)
+      .map((s) => ({ date: s.date, total: s.total, label: s.fromStrava ? `sim on Strava ("${s.name}")` : "logged full sim" })),
   });
 }
 
@@ -627,7 +654,7 @@ export async function hyroxData(divisionParam?: string) {
   const main = e.athlete.hyrox_division as Division;
 
   // A prediction for every category you've raced, plus your main division.
-  const raced = [...new Set<Division>([main, ...results.map((r) => r.division), ...sims.map((s) => s.splits.division ?? main)])];
+  const raced = [...new Set<Division>([main, ...results.map((r) => r.division), ...sims.map((s) => s.splits.division ?? main), ...simResults(e).map((s) => s.division)])];
   const division = raced.includes(divisionParam as Division) ? (divisionParam as Division) : main;
   const categories = raced.map((d) => ({ division: d, label: DIVISIONS[d], prediction: predictAt(e, runs, sims, today(), true, d).total, best: bestIn(results, d) }));
 
@@ -640,7 +667,7 @@ export async function hyroxData(divisionParam?: string) {
   }
   const sessions = e.activities.filter((a) => a.sport === "HYROX");
   return {
-    sims: simResults(e).slice(0, 12),
+    sims: simResults(e).slice(0, 12).map((s) => ({ ...s, divisionLabel: DIVISIONS[s.division] })),
     possibleSims: possibleSims(e, simResults(e)),
     division,
     categories,

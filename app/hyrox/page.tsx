@@ -251,7 +251,7 @@ export default async function Hyrox({ searchParams }: { searchParams: Promise<{ 
                   <div className="min-w-0">
                     <Link href={`/session/${s.id}`} className="block truncate hover:text-accent">{s.date} · {s.name}</Link>
                     <div className="text-xs text-muted">
-                      {s.kind === "full" ? "Full sim · counts towards the prediction" : "Half sim · not used for the full-race time"}
+                      {s.divisionLabel} · {s.kind === "full" ? (s.division === d.division ? "counts towards this prediction" : "full sim") : "half sim · not used for the full-race time"}
                       {s.marked ? "" : " · from its name"}
                       {s.fromStrava ? " · from Strava" : ""}
                     </div>

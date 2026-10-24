@@ -247,6 +247,9 @@ export interface PredictionInput {
 /** Session names that mean a HYROX simulation: "Hyrox sim", "Simulation", "half sim"… */
 export const SIM_NAME = /\bsim(ulation)?s?\b/i;
 
+/** Names that say a session was done with a partner. */
+export const DOUBLES_NAME = /doubles|pairs?\b|partner|relay|team/i;
+
 /** "full" for a whole race simulation, "half" for a half sim, null if it doesn't look like either. */
 export function simKind(name: string | null, durationS: number): "full" | "half" | null {
   if (!SIM_NAME.test(name ?? "")) return null;

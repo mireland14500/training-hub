@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { pace500FromWatts, sessionLoad } from "@/lib/analysis";
 import { db, getAthlete } from "@/lib/db";
-import { currentHyroxPrediction, localDate } from "@/lib/data";
+import { currentHyroxPredictions, localDate } from "@/lib/data";
+import { DIVISIONS } from "@/lib/hyrox";
 import { sanitizeEntries } from "@/lib/workout";
 import { recomputeLoads, resetRunAnalysis } from "@/lib/sync";
 
@@ -414,22 +415,36 @@ export async function deleteBodyScan(form: FormData) {
   revalidatePath("/body");
 }
 
-/** Marks a session as a full/half HYROX sim (or not a sim) and returns the prediction before and after. */
-export async function markSim(form: FormData): Promise<{ before: number | null; after: number | null; error?: string }> {
+export interface SimChange {
+  label: string;
+  before: number | null;
+  after: number | null;
+}
+
+/** Marks a session as a full/half HYROX sim (or not a sim) and returns how each category's prediction moved. */
+export async function markSim(form: FormData): Promise<{ changes: SimChange[]; error?: string }> {
   const id = str(form, "id");
   const kind = str(form, "kind");
-  if (!id || !kind || !["full", "half", "none", "auto"].includes(kind)) return { before: null, after: null, error: "Pick full sim, half sim or not a sim" };
+  const division = str(form, "division");
+  if (!id || !kind || !["full", "half", "none", "auto"].includes(kind)) return { changes: [], error: "Pick full sim, half sim or not a sim" };
+  if (division && !(division in DIVISIONS)) return { changes: [], error: "Unknown category" };
+  const isSim = kind === "full" || kind === "half";
   const time = duration(form, "sim_time");
-  const before = await currentHyroxPrediction().catch(() => null);
+  const chosen = division ? [division as keyof typeof DIVISIONS] : [];
+  const before = await currentHyroxPredictions(chosen).catch(() => ({}) as Record<string, number>);
   const { error } = await db()
     .from("activities")
-    .update({ sim_kind: kind === "auto" ? null : kind, sim_time_s: kind === "full" || kind === "half" ? (time ? Math.round(time) : null) : null })
+    .update({ sim_kind: kind === "auto" ? null : kind, sim_time_s: isSim && time ? Math.round(time) : null, sim_division: isSim ? division : null })
     .eq("id", id);
   if (error) {
-    const missing = /sim_kind|sim_time_s/.test(error.message);
-    return { before, after: null, error: missing ? "Run supabase/schema.sql in Supabase first (adds the sim columns)." : error.message };
+    const missing = /sim_kind|sim_time_s|sim_division/.test(error.message);
+    return { changes: [], error: missing ? "Run supabase/schema.sql in Supabase first (adds the sim columns)." : error.message };
   }
-  const after = await currentHyroxPrediction().catch(() => null);
+  const after = await currentHyroxPredictions(chosen).catch(() => ({}) as Record<string, number>);
   revalidatePath("/", "layout");
-  return { before, after };
+  // The chosen category first, then any other category that moved (e.g. singles, when a doubles sim leaves it).
+  const keys = [...new Set([division ?? "", ...Object.keys(after)])].filter((k) => k && (k === division || Math.round(after[k] ?? 0) !== Math.round(before[k] ?? 0)));
+  return {
+    changes: keys.map((k) => ({ label: DIVISIONS[k as keyof typeof DIVISIONS], before: before[k] ?? null, after: after[k] ?? null })),
+  };
 }

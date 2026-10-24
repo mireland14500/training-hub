@@ -81,6 +81,8 @@ export interface ActivityRow {
   sim_kind?: "full" | "half" | "none" | null;
   /** Sim finish time when the recording includes a warm-up etc. */
   sim_time_s?: number | null;
+  /** Category the sim was done in (e.g. "pro_doubles_men"); empty = your main division. */
+  sim_division?: string | null;
 }
 
 export interface AthleteRow {

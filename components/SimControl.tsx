@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { markSim } from "@/app/actions";
+import { markSim, type SimChange } from "@/app/actions";
 import Runner from "./Runner";
 import { fmtTime } from "./photo";
 
@@ -24,6 +24,11 @@ function clock(s: number) {
   return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
 }
 
+/** A gap: "4:53", or "1:02:10" past an hour. */
+function gap(s: number) {
+  return s >= 3600 ? clock(s) : `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
+}
+
 /**
  * "Was this a HYROX sim?" on a session. Saving shows an "Updating race predictions"
  * screen, then the prediction before and after.
@@ -34,6 +39,8 @@ export default function SimControl({
   autoKind,
   durationS,
   simTimeS,
+  division,
+  divisions,
 }: {
   id: string;
   current: "full" | "half" | "none" | null;
@@ -41,12 +48,17 @@ export default function SimControl({
   autoKind: "full" | "half" | null;
   durationS: number;
   simTimeS: number | null;
+  /** Category the sim currently counts for. */
+  division: string;
+  /** Categories to choose from, most likely first: [key, label]. */
+  divisions: [string, string][];
 }) {
   const router = useRouter();
   const effective = current ?? autoKind ?? "none";
   const [kind, setKind] = useState<Kind>(effective);
   const [time, setTime] = useState(fmtTime(simTimeS ?? durationS));
-  const [overlay, setOverlay] = useState<null | { before: number | null; after: number | null; error?: string; done: boolean }>(null);
+  const [category, setCategory] = useState(division);
+  const [overlay, setOverlay] = useState<null | { changes: SimChange[]; error?: string; done: boolean }>(null);
   const [step, setStep] = useState(0);
 
   useEffect(() => {
@@ -57,25 +69,27 @@ export default function SimControl({
 
   async function save() {
     setStep(0);
-    setOverlay({ before: null, after: null, done: false });
+    setOverlay({ changes: [], done: false });
     const form = new FormData();
     form.set("id", id);
     form.set("kind", kind);
     form.set("sim_time", time);
+    form.set("division", category);
     const started = Date.now();
-    const r = await markSim(form).catch((e: Error) => ({ before: null, after: null, error: e.message }));
+    const r = await markSim(form).catch((e: Error) => ({ changes: [] as SimChange[], error: e.message }));
     // Let the animation breathe for a moment, even on a fast connection.
     await new Promise((res) => setTimeout(res, Math.max(0, 1800 - (Date.now() - started))));
     setOverlay({ ...r, done: true });
     router.refresh();
   }
 
+  const divisionLabel = divisions.find(([k]) => k === division)?.[1] ?? division;
   const status =
     effective === "none"
       ? "Not counted as a sim."
-      : `Counted as a ${effective} sim${current ? "" : " (from its name)"} · ${clock(simTimeS ?? durationS)}${effective === "full" ? " · feeds your race prediction" : ""}`;
-  const changed = kind !== effective || (kind !== "none" && time !== fmtTime(simTimeS ?? durationS));
-  const diff = overlay?.before != null && overlay.after != null ? Math.round(overlay.after - overlay.before) : null;
+      : `Counted as a ${effective} sim${current ? "" : " (from its name)"} · ${divisionLabel} · ${clock(simTimeS ?? durationS)}${effective === "full" ? ` · feeds your ${divisionLabel} prediction` : ""}`;
+  const isSim = kind === "full" || kind === "half";
+  const changed = kind !== effective || (isSim && (time !== fmtTime(simTimeS ?? durationS) || category !== division));
 
   return (
     <div className="card space-y-3">
@@ -96,7 +110,19 @@ export default function SimControl({
           </button>
         ))}
       </div>
-      {(kind === "full" || kind === "half") && (
+      {isSim && (
+        <label className="block">
+          <span className="text-xs text-muted">Category — a doubles sim only changes your doubles prediction</span>
+          <select value={category} onChange={(e) => setCategory(e.target.value)} className="input mt-1">
+            {divisions.map(([k, label]) => (
+              <option key={k} value={k}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      {isSim && (
         <label className="block">
           <span className="text-xs text-muted">Sim finish time (leave out any warm-up)</span>
           <input value={time} onChange={(e) => setTime(e.target.value)} inputMode="numeric" placeholder="1:05:30" className="input tabular mt-1" />
@@ -121,25 +147,31 @@ export default function SimControl({
                 <p className="mt-1 text-sm text-bad">{overlay.error}</p>
               </div>
             ) : (
-              <div className="space-y-2">
-                <h2 className="text-xl font-extrabold">Race prediction updated</h2>
-                {overlay.after != null && (
-                  <div className="flex items-baseline justify-center gap-3 tabular">
-                    {overlay.before != null && diff !== 0 && <span className="text-lg text-muted line-through">{clock(overlay.before)}</span>}
-                    <span className="text-3xl font-extrabold">{clock(overlay.after)}</span>
-                  </div>
-                )}
-                <p className="text-sm text-muted">
-                  {diff === null
-                    ? "Saved."
-                    : diff < 0
-                      ? `${clock(-diff).replace(/^0:/, "")} faster — your sim beats the station-by-station estimate.`
-                      : diff > 0
-                        ? `${clock(diff).replace(/^0:/, "")} slower without this sim.`
-                        : kind === "full"
-                          ? "No change: the station-by-station estimate is already faster than this sim."
-                          : "No change to your full-race prediction."}
-                </p>
+              <div className="space-y-3">
+                <h2 className="text-xl font-extrabold">{overlay.changes.some((c) => c.before !== c.after) ? "Race prediction updated" : "Saved"}</h2>
+                {overlay.changes.map((c) => {
+                  const diff = c.before != null && c.after != null ? Math.round(c.after - c.before) : null;
+                  return (
+                    <div key={c.label} className="rounded-xl bg-bg p-3">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-muted">{c.label}</div>
+                      {c.after != null && (
+                        <div className="tabular mt-0.5 flex items-baseline justify-center gap-3">
+                          {c.before != null && diff !== 0 && <span className="text-base text-muted line-through">{clock(c.before)}</span>}
+                          <span className="text-2xl font-extrabold">{clock(c.after)}</span>
+                        </div>
+                      )}
+                      <p className="text-xs text-muted">
+                        {diff === null || diff === 0
+                          ? kind === "full"
+                            ? "No change: the station-by-station estimate is already faster than this sim."
+                            : "No change."
+                          : diff < 0
+                            ? `${gap(-diff)} faster — your sim beats the station-by-station estimate.`
+                            : `${gap(diff)} slower — this sim no longer counts here.`}
+                      </p>
+                    </div>
+                  );
+                })}
               </div>
             )}
             {overlay.done && (

@@ -5,9 +5,9 @@ import { FOCUS_LABEL } from "@/components/categories";
 import SessionEditor from "@/components/SessionEditor";
 import SimControl from "@/components/SimControl";
 import { formatDuration, formatPace } from "@/lib/analysis";
-import { getActivity, localDate, templatesFor } from "@/lib/data";
+import { getActivity, localDate, simDivisions, templatesFor } from "@/lib/data";
 import { getAthlete } from "@/lib/db";
-import { SIM_NAME, simKind } from "@/lib/hyrox";
+import { DIVISIONS, SIM_NAME, simKind, type Division } from "@/lib/hyrox";
 import { isRun } from "@/lib/strava";
 
 export const dynamic = "force-dynamic";
@@ -26,6 +26,8 @@ export default async function Session({ params }: { params: Promise<{ id: string
   const [{ templates, suggestedId }, athlete] = await Promise.all([templatesFor(a), getAthlete()]);
   // Offer the sim control on anything that could be one: named like a sim, already marked, or any
   // non-run session when HYROX predictions are on.
+  const sim = await simDivisions(a);
+  const divisionChoices: [string, string][] = [...new Set<Division>([sim.main, sim.doubles, ...(Object.keys(DIVISIONS) as Division[])])].map((d) => [d, DIVISIONS[d]]);
   const showSim = a.sport !== "HYROX" && (!!a.sim_kind || SIM_NAME.test(a.name ?? "") || (athlete.show_predictions && !isRun(a.sport) && a.sport !== "Ride"));
   const date = localDate(a.start_time);
   const time = new Date(a.start_time).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: process.env.APP_TIMEZONE || "UTC" });
@@ -58,7 +60,7 @@ export default async function Session({ params }: { params: Promise<{ id: string
       />
 
       {showSim && (
-        <SimControl id={a.id} current={a.sim_kind ?? null} autoKind={simKind(a.name, a.duration_s)} durationS={a.duration_s} simTimeS={a.sim_time_s ?? null} />
+        <SimControl id={a.id} current={a.sim_kind ?? null} autoKind={simKind(a.name, a.duration_s)} durationS={a.duration_s} simTimeS={a.sim_time_s ?? null} division={sim.current} divisions={divisionChoices} />
       )}
 
       {a.source !== "strava" && (
