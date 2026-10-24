@@ -175,7 +175,28 @@ create table if not exists garmin_auth (
   updated_at timestamptz default now()
 );
 
+-- InBody (or any body-composition) scans, read from a photo of the result sheet or app.
+create table if not exists body_scans (
+  id uuid primary key default gen_random_uuid(),
+  date date not null,
+  weight_kg numeric,
+  skeletal_muscle_kg numeric,
+  body_fat_kg numeric,
+  body_fat_pct numeric,
+  lean_mass_kg numeric,
+  total_body_water_l numeric,
+  visceral_fat_level numeric,
+  bmr_kcal int,
+  inbody_score int,
+  segmental_lean jsonb,
+  photo_path text,
+  notes text,
+  created_at timestamptz default now()
+);
+create index if not exists body_scans_date on body_scans (date);
+
 alter table strava_auth enable row level security;
+alter table body_scans enable row level security;
 alter table garmin_auth enable row level security;
 alter table athlete enable row level security;
 alter table activities enable row level security;

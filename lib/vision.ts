@@ -112,6 +112,41 @@ Rules:
 - Pick the focus that best describes the session (threshold, intervals, hyrox, strength…), or "unknown".
 - Use null for anything not shown. Do not invent numbers; mention unclear items in notes.`;
 
+// ---------------------------------------------------------------------------
+// InBody result sheet or app screenshot
+// ---------------------------------------------------------------------------
+
+const Segments = z.object({
+  right_arm: z.number().nullable(),
+  left_arm: z.number().nullable(),
+  trunk: z.number().nullable(),
+  right_leg: z.number().nullable(),
+  left_leg: z.number().nullable(),
+});
+
+export const InBodyReading = z.object({
+  date: z.string().nullable().describe("Test date as YYYY-MM-DD if shown"),
+  weight_kg: z.number().nullable(),
+  skeletal_muscle_kg: z.number().nullable().describe("Skeletal Muscle Mass (SMM)"),
+  body_fat_kg: z.number().nullable().describe("Body Fat Mass"),
+  body_fat_pct: z.number().nullable().describe("Percent Body Fat (PBF)"),
+  lean_mass_kg: z.number().nullable().describe("Fat Free Mass, or Lean Body Mass if that is what is shown"),
+  total_body_water_l: z.number().nullable(),
+  visceral_fat_level: z.number().nullable(),
+  bmr_kcal: z.number().nullable().describe("Basal Metabolic Rate"),
+  inbody_score: z.number().nullable(),
+  segmental_lean_kg: Segments.describe("Segmental Lean Analysis in kg (not %)"),
+  notes: z.string().describe("Anything unclear; empty string if none"),
+});
+export type InBodyReading = z.infer<typeof InBodyReading>;
+
+const INBODY_PROMPT = `This image is a body-composition result — an InBody result sheet, the InBody app, or a similar scale/report.
+Read the values for this test only (ignore history columns and normal-range bars).
+- Weights in kg (lb × 0.4536). Body water in litres.
+- Segmental lean values are the kg figures for each arm, trunk and leg — not the percentage underneath.
+- The date is the test date, as YYYY-MM-DD.
+Use null for anything not shown. Do not guess; mention unclear values in notes.`;
+
 let client: Anthropic | null = null;
 
 async function readImage<T extends z.ZodType>(schema: T, prompt: string, imageBase64: string, mediaType: ImageType): Promise<z.infer<T>> {
@@ -144,6 +179,10 @@ export function readErgMonitor(imageBase64: string, mediaType: ImageType): Promi
 
 export function readHyroxResults(imageBase64: string, mediaType: ImageType): Promise<HyroxReading> {
   return readImage(HyroxReading, HYROX_PROMPT, imageBase64, mediaType);
+}
+
+export function readInBody(imageBase64: string, mediaType: ImageType): Promise<InBodyReading> {
+  return readImage(InBodyReading, INBODY_PROMPT, imageBase64, mediaType);
 }
 
 export function readWorkout(imageBase64: string, mediaType: ImageType): Promise<WorkoutReading> {

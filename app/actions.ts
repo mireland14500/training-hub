@@ -375,3 +375,41 @@ export async function confirmRace(form: FormData) {
   revalidatePath("/", "layout");
   redirect("/hyrox");
 }
+
+const SEGMENTS = ["right_arm", "left_arm", "trunk", "right_leg", "left_leg"] as const;
+
+export async function saveBodyScan(form: FormData) {
+  const date = str(form, "date");
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("Date is required");
+  const weight = num(form, "weight_kg");
+  const fatKg = num(form, "body_fat_kg");
+  // Fill in % from kg (or the other way round) when only one was on the sheet.
+  const fatPct = num(form, "body_fat_pct") ?? (weight && fatKg ? Math.round((fatKg / weight) * 1000) / 10 : null);
+  const segments = Object.fromEntries(SEGMENTS.map((k) => [k, num(form, `seg_${k}`)]));
+  const row = {
+    date,
+    weight_kg: weight,
+    skeletal_muscle_kg: num(form, "skeletal_muscle_kg"),
+    body_fat_kg: fatKg ?? (weight && fatPct ? Math.round(weight * fatPct) / 100 : null),
+    body_fat_pct: fatPct,
+    lean_mass_kg: num(form, "lean_mass_kg"),
+    total_body_water_l: num(form, "total_body_water_l"),
+    visceral_fat_level: num(form, "visceral_fat_level"),
+    bmr_kcal: num(form, "bmr_kcal"),
+    inbody_score: num(form, "inbody_score"),
+    segmental_lean: Object.values(segments).some((v) => v !== null) ? segments : null,
+    photo_path: str(form, "photo_path"),
+    notes: str(form, "notes"),
+  };
+  if (!row.weight_kg && !row.body_fat_pct && !row.skeletal_muscle_kg) throw new Error("Enter at least weight, body fat or muscle mass");
+  const { error } = await db().from("body_scans").insert(row);
+  if (error) throw new Error(error.message);
+  revalidatePath("/body");
+  redirect("/body");
+}
+
+export async function deleteBodyScan(form: FormData) {
+  const id = str(form, "id");
+  if (id) await db().from("body_scans").delete().eq("id", id);
+  revalidatePath("/body");
+}

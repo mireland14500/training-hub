@@ -14,6 +14,31 @@ export function db(): SupabaseClient {
   return client;
 }
 
+export interface SegmentalLean {
+  right_arm: number | null;
+  left_arm: number | null;
+  trunk: number | null;
+  right_leg: number | null;
+  left_leg: number | null;
+}
+
+export interface BodyScanRow {
+  id: string;
+  date: string;
+  weight_kg: number | null;
+  skeletal_muscle_kg: number | null;
+  body_fat_kg: number | null;
+  body_fat_pct: number | null;
+  lean_mass_kg: number | null;
+  total_body_water_l: number | null;
+  visceral_fat_level: number | null;
+  bmr_kcal: number | null;
+  inbody_score: number | null;
+  segmental_lean: SegmentalLean | null;
+  photo_path: string | null;
+  notes: string | null;
+}
+
 export interface ActivityRow {
   id: string;
   source: "strava" | "ski_photo" | "manual";

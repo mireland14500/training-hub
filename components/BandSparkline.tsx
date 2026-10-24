@@ -7,6 +7,7 @@ export default function BandSparkline({
   width = 326,
   height = 90,
   invert = false,
+  margin = 3,
 }: {
   points: (number | null)[];
   band: [number, number] | null;
@@ -16,11 +17,13 @@ export default function BandSparkline({
   height?: number;
   /** Lower is better (e.g. pace): plot smaller values higher. */
   invert?: boolean;
+  /** Space above and below the data, in the data's units. */
+  margin?: number;
 }) {
   const vals = points.filter((v): v is number => v !== null);
   if (vals.length < 2) return <p className="text-sm text-muted">Not enough data yet.</p>;
-  const lo = Math.min(...vals, band?.[0] ?? Infinity) - 3;
-  const hi = Math.max(...vals, band?.[1] ?? -Infinity) + 3;
+  const lo = Math.min(...vals, band?.[0] ?? Infinity) - margin;
+  const hi = Math.max(...vals, band?.[1] ?? -Infinity) + margin;
   const pad = 4;
   const x = (i: number) => pad + (i * (width - 2 * pad)) / (points.length - 1);
   const y = (v: number) => pad + ((invert ? v - lo : hi - v) / (hi - lo)) * (height - 2 * pad);

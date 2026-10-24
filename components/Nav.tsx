@@ -7,6 +7,7 @@ const ITEMS = [
   { href: "/", label: "Today", icon: "M12 21s-7-4.5-9.5-9A5.5 5.5 0 0 1 12 6a5.5 5.5 0 0 1 9.5 6c-2.5 4.5-9.5 9-9.5 9Z" },
   { href: "/calendar", label: "Calendar", icon: "M4 6h16v14H4zM4 10h16M8 3v4M16 3v4" },
   { href: "/running", label: "Running", icon: "M3 12h4l3-8 4 16 3-8h4" },
+  { href: "/body", label: "Body", icon: "M12 3a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5ZM6 10h12M12 10v5l-3 6M12 15l3 6" },
 ];
 const PREDICTION_ITEMS = [
   { href: "/hyrox", label: "HYROX", icon: "M5 21V4M5 4h11l-2 4 2 4H5" },

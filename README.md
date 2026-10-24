@@ -22,6 +22,7 @@ Data comes from:
 - Erg sessions logged from a photo of the monitor.
 - HYROX sims and races logged by hand, or from a results screenshot.
 - Station benchmarks (e.g. 100 wall balls in 5:40).
+- **Body:** InBody scans read from a photo of the result sheet or an app screenshot. Tracks weight, body fat and muscle trends and left/right leg balance, and gives a rough guide to how fat-mass changes affect your threshold pace.
 - A 20-second morning check-in with your Garmin HRV, sleep and Body Battery.
 
 It's a **Progressive Web App (PWA)**: open the URL on your phone and choose *Add to Home Screen* to get it as an app.

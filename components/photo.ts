@@ -12,7 +12,7 @@ export async function resizeImage(file: File, max = 1600): Promise<Blob> {
 }
 
 /** Uploads a photo and returns what was read from it. */
-export async function readPhoto<T>(file: File, kind: "erg" | "hyrox" | "workout"): Promise<{ photoPath?: string; reading: T | null; error?: string }> {
+export async function readPhoto<T>(file: File, kind: "erg" | "hyrox" | "workout" | "inbody"): Promise<{ photoPath?: string; reading: T | null; error?: string }> {
   const body = new FormData();
   body.append("kind", kind);
   body.append("photo", new File([await resizeImage(file)], "photo.jpg", { type: "image/jpeg" }));
