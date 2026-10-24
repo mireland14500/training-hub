@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { pace500FromWatts, sessionLoad } from "@/lib/analysis";
 import { db, getAthlete } from "@/lib/db";
-import { localDate } from "@/lib/data";
+import { currentHyroxPrediction, localDate } from "@/lib/data";
 import { sanitizeEntries } from "@/lib/workout";
 import { recomputeLoads, resetRunAnalysis } from "@/lib/sync";
 
@@ -412,4 +412,24 @@ export async function deleteBodyScan(form: FormData) {
   const id = str(form, "id");
   if (id) await db().from("body_scans").delete().eq("id", id);
   revalidatePath("/body");
+}
+
+/** Marks a session as a full/half HYROX sim (or not a sim) and returns the prediction before and after. */
+export async function markSim(form: FormData): Promise<{ before: number | null; after: number | null; error?: string }> {
+  const id = str(form, "id");
+  const kind = str(form, "kind");
+  if (!id || !kind || !["full", "half", "none", "auto"].includes(kind)) return { before: null, after: null, error: "Pick full sim, half sim or not a sim" };
+  const time = duration(form, "sim_time");
+  const before = await currentHyroxPrediction().catch(() => null);
+  const { error } = await db()
+    .from("activities")
+    .update({ sim_kind: kind === "auto" ? null : kind, sim_time_s: kind === "full" || kind === "half" ? (time ? Math.round(time) : null) : null })
+    .eq("id", id);
+  if (error) {
+    const missing = /sim_kind|sim_time_s/.test(error.message);
+    return { before, after: null, error: missing ? "Run supabase/schema.sql in Supabase first (adds the sim columns)." : error.message };
+  }
+  const after = await currentHyroxPrediction().catch(() => null);
+  revalidatePath("/", "layout");
+  return { before, after };
 }

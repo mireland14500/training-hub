@@ -3,8 +3,11 @@ import { notFound } from "next/navigation";
 import { deleteSession } from "@/app/actions";
 import { FOCUS_LABEL } from "@/components/categories";
 import SessionEditor from "@/components/SessionEditor";
+import SimControl from "@/components/SimControl";
 import { formatDuration, formatPace } from "@/lib/analysis";
 import { getActivity, localDate, templatesFor } from "@/lib/data";
+import { getAthlete } from "@/lib/db";
+import { SIM_NAME, simKind } from "@/lib/hyrox";
 import { isRun } from "@/lib/strava";
 
 export const dynamic = "force-dynamic";
@@ -20,7 +23,10 @@ export default async function Session({ params }: { params: Promise<{ id: string
   const { id } = await params;
   const a = await getActivity(id);
   if (!a) notFound();
-  const { templates, suggestedId } = await templatesFor(a);
+  const [{ templates, suggestedId }, athlete] = await Promise.all([templatesFor(a), getAthlete()]);
+  // Offer the sim control on anything that could be one: named like a sim, already marked, or any
+  // non-run session when HYROX predictions are on.
+  const showSim = a.sport !== "HYROX" && (!!a.sim_kind || SIM_NAME.test(a.name ?? "") || (athlete.show_predictions && !isRun(a.sport) && a.sport !== "Ride"));
   const date = localDate(a.start_time);
   const time = new Date(a.start_time).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: process.env.APP_TIMEZONE || "UTC" });
   const facts = [
@@ -50,6 +56,10 @@ export default async function Session({ params }: { params: Promise<{ id: string
         templates={templates}
         suggestedId={suggestedId}
       />
+
+      {showSim && (
+        <SimControl id={a.id} current={a.sim_kind ?? null} autoKind={simKind(a.name, a.duration_s)} durationS={a.duration_s} simTimeS={a.sim_time_s ?? null} />
+      )}
 
       {a.source !== "strava" && (
         <form action={deleteSession}>

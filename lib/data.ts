@@ -35,6 +35,7 @@ import {
   type Benchmark,
   type Prediction,
   simKind,
+  SIM_NAME,
 } from "./hyrox";
 import { categorize, timeOffStatus, weeklyPlan, type SessionSummary, type TimeOff } from "./plan";
 import { recoveryStatus, todayCall, type RecoveryDay } from "./recovery";
@@ -373,6 +374,8 @@ export interface SimResult {
   total: number;
   kind: "full" | "half";
   fromStrava: boolean;
+  /** You marked it yourself (vs picked up from the name). */
+  marked: boolean;
 }
 
 /**
@@ -382,21 +385,43 @@ export interface SimResult {
 function simResults(e: Everything): SimResult[] {
   const out: SimResult[] = [];
   for (const a of e.activities) {
-    if (a.excluded || a.focus === "race") continue;
+    if (a.excluded || a.focus === "race" || a.sim_kind === "none") continue;
     const date = localDate(a.start_time);
+    const total = a.sim_time_s || a.duration_s;
+    if (a.sim_kind === "full" || a.sim_kind === "half") {
+      out.push({ id: a.id, date, name: a.name ?? "Sim", total, kind: a.sim_kind, fromStrava: a.source === "strava", marked: true });
+      continue;
+    }
     if (a.sport === "HYROX") {
       const kind = (a.details as unknown as HyroxSplits | null)?.kind;
-      if (kind === "full_sim" || kind === "half_sim") out.push({ id: a.id, date, name: a.name ?? "HYROX sim", total: a.duration_s, kind: kind === "full_sim" ? "full" : "half", fromStrava: false });
+      if (kind === "full_sim" || kind === "half_sim") out.push({ id: a.id, date, name: a.name ?? "HYROX sim", total, kind: kind === "full_sim" ? "full" : "half", fromStrava: false, marked: true });
       continue;
     }
     // Elapsed time for a sim: the clock runs through the Roxzone.
     const kind = simKind(a.name, a.duration_s);
-    if (kind) out.push({ id: a.id, date, name: a.name ?? "Sim", total: a.duration_s, kind, fromStrava: a.source === "strava" });
+    if (kind) out.push({ id: a.id, date, name: a.name ?? "Sim", total, kind, fromStrava: a.source === "strava", marked: false });
   }
   // The same sim logged with splits and recorded on Strava: keep the logged one.
   return out
-    .filter((s) => !s.fromStrava || !out.some((o) => !o.fromStrava && o.kind === s.kind && Math.abs(Date.parse(o.date) - Date.parse(s.date)) <= 86400000))
+    .filter((s) => s.marked || !s.fromStrava || !out.some((o) => !o.fromStrava && o.kind === s.kind && Math.abs(Date.parse(o.date) - Date.parse(s.date)) <= 86400000))
     .sort((a, b) => (a.date < b.date ? 1 : -1));
+}
+
+/** Sessions named like a sim that weren't picked up automatically (e.g. a recording with a long warm-up). */
+function possibleSims(e: Everything, sims: SimResult[]) {
+  return e.activities
+    // Ones the name already covers are either counted or a duplicate of a logged sim.
+    .filter((a) => !a.excluded && a.sport !== "HYROX" && !a.sim_kind && a.focus !== "race" && SIM_NAME.test(a.name ?? "") && !simKind(a.name, a.duration_s))
+    .filter((a) => !sims.some((s) => s.id === a.id))
+    .map((a) => ({ id: a.id, date: localDate(a.start_time), name: a.name ?? "Sim", total: a.duration_s }))
+    .slice(0, 10);
+}
+
+/** Today's singles prediction — used to show the before/after when you mark a sim. */
+export async function currentHyroxPrediction(): Promise<number> {
+  const e = await loadEverything();
+  const runs = e.activities.filter((a) => isRun(a.sport));
+  return predictAt(e, runs, hyroxSessions(e, runs), today(), true).total;
 }
 
 /**
@@ -616,6 +641,7 @@ export async function hyroxData(divisionParam?: string) {
   const sessions = e.activities.filter((a) => a.sport === "HYROX");
   return {
     sims: simResults(e).slice(0, 12),
+    possibleSims: possibleSims(e, simResults(e)),
     division,
     categories,
     results,

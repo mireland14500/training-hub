@@ -223,10 +223,26 @@ export default async function Hyrox({ searchParams }: { searchParams: Promise<{ 
               </li>
             ))}
           </ul>
+          {d.possibleSims.length > 0 && (
+            <div className="mt-4 rounded-xl border border-warn/40 bg-warn/10 p-3">
+              <div className="text-sm font-semibold">Named like a sim, but not counted yet</div>
+              <p className="text-xs text-muted">Too long or short to be sure (often a warm-up on the recording). Open it and tap Full sim, with your finish time.</p>
+              <ul className="mt-1 divide-y divide-border">
+                {d.possibleSims.map((s) => (
+                  <li key={s.id}>
+                    <Link href={`/session/${s.id}`} className="flex justify-between gap-2 py-2 text-sm hover:text-accent">
+                      <span className="truncate">{s.date} · {s.name}</span>
+                      <span className="tabular shrink-0">{formatDuration(s.total)} →</span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div className="label mb-1 mt-4">Sims</div>
           {d.sims.length === 0 ? (
             <p className="text-sm text-muted">
-              None yet. Name a Strava session &quot;Hyrox sim&quot; or &quot;simulation&quot; (or log one with splits) and full sims count towards your singles prediction.
+              None yet. Open any session and tap <b>Full sim</b>, or name it &quot;sim&quot; on Strava. Full sims count towards your singles prediction.
             </p>
           ) : (
             <ul className="divide-y divide-border">
@@ -236,6 +252,7 @@ export default async function Hyrox({ searchParams }: { searchParams: Promise<{ 
                     <Link href={`/session/${s.id}`} className="block truncate hover:text-accent">{s.date} · {s.name}</Link>
                     <div className="text-xs text-muted">
                       {s.kind === "full" ? "Full sim · counts towards the prediction" : "Half sim · not used for the full-race time"}
+                      {s.marked ? "" : " · from its name"}
                       {s.fromStrava ? " · from Strava" : ""}
                     </div>
                   </div>

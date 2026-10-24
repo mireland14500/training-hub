@@ -77,6 +77,10 @@ export interface ActivityRow {
   garmin_type: string | null;
   strava_best_efforts: Record<string, number> | null;
   notes: string | null;
+  /** Your call on whether this was a HYROX sim ("none" = not a sim, overriding the name). */
+  sim_kind?: "full" | "half" | "none" | null;
+  /** Sim finish time when the recording includes a warm-up etc. */
+  sim_time_s?: number | null;
 }
 
 export interface AthleteRow {
