@@ -2,7 +2,7 @@ import Link from "next/link";
 import { HyroxTrendChart } from "@/components/Charts";
 import { BenchmarkDelete } from "@/components/ActivityControls";
 import { formatDuration } from "@/lib/analysis";
-import { hyroxData, localDate } from "@/lib/data";
+import { hyroxData } from "@/lib/data";
 import { confirmRace } from "@/app/actions";
 import { DIVISIONS, isDoubles, reference, STATION_BY_KEY, type Source } from "@/lib/hyrox";
 
@@ -84,6 +84,11 @@ export default async function Hyrox({ searchParams }: { searchParams: Promise<{ 
               <div className="label">Predicted</div>
               <div className="tabular mt-1 text-4xl font-bold">{formatDuration(p.total)}</div>
               <div className="tabular mt-1 text-xs text-muted">range {formatDuration(p.low)} – {formatDuration(p.high)}</div>
+              {p.simAnchor && (
+                <div className="mt-1 text-xs font-semibold text-good">
+                  Set by your {formatDuration(p.simAnchor.total)} sim ({p.simAnchor.date})
+                </div>
+              )}
             </div>
             <div>
               <div className="label">Your best</div>
@@ -105,7 +110,12 @@ export default async function Hyrox({ searchParams }: { searchParams: Promise<{ 
             <div className="mt-1 h-2 overflow-hidden rounded-full bg-border">
               <div className="h-full rounded-full bg-good" style={{ width: `${p.confidence * 100}%` }} />
             </div>
-            {p.confidence < 0.7 && (
+            {p.simAnchor && (
+            <p className="mt-2 text-xs text-muted">
+              Your {p.simAnchor.label} on {p.simAnchor.date} beat the segment-by-segment estimate ({formatDuration(p.simAnchor.modelled)}), so the prediction uses the sim. The segments below are scaled to match.
+            </p>
+          )}
+          {p.confidence < 0.7 && (
               <p className="mt-2 text-xs text-muted">Segments marked <span style={{ color: "var(--warn)" }}>typical</span> use average times for your division. Log benchmarks or a sim to make the prediction yours.</p>
             )}
           </div>
@@ -213,20 +223,26 @@ export default async function Hyrox({ searchParams }: { searchParams: Promise<{ 
               </li>
             ))}
           </ul>
-          {d.sessions.some((s) => (s.details as { kind?: string } | null)?.kind !== "race") && (
-            <>
-              <div className="label mb-1 mt-4">Sims</div>
-              <ul className="divide-y divide-border">
-                {d.sessions
-                  .filter((s) => (s.details as { kind?: string } | null)?.kind !== "race")
-                  .map((s) => (
-                    <li key={s.id} className="flex justify-between py-2 text-sm">
-                      <span>{localDate(s.start_time)} · {s.name}</span>
-                      <span className="tabular font-semibold">{formatDuration(s.duration_s)}</span>
-                    </li>
-                  ))}
-              </ul>
-            </>
+          <div className="label mb-1 mt-4">Sims</div>
+          {d.sims.length === 0 ? (
+            <p className="text-sm text-muted">
+              None yet. Name a Strava session &quot;Hyrox sim&quot; or &quot;simulation&quot; (or log one with splits) and full sims count towards your singles prediction.
+            </p>
+          ) : (
+            <ul className="divide-y divide-border">
+              {d.sims.map((s) => (
+                <li key={s.id} className="flex items-center justify-between gap-2 py-2 text-sm">
+                  <div className="min-w-0">
+                    <Link href={`/session/${s.id}`} className="block truncate hover:text-accent">{s.date} · {s.name}</Link>
+                    <div className="text-xs text-muted">
+                      {s.kind === "full" ? "Full sim · counts towards the prediction" : "Half sim · not used for the full-race time"}
+                      {s.fromStrava ? " · from Strava" : ""}
+                    </div>
+                  </div>
+                  <span className={`tabular shrink-0 font-semibold ${p.simAnchor && p.simAnchor.date === s.date && p.simAnchor.total === s.total ? "text-good" : ""}`}>{formatDuration(s.total)}</span>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
         <div className="card">

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { benchmarkToRace, bestErg1k, erg1kEquivalent, opportunities, predictHyrox, reference, REFERENCE, type PredictionInput } from "@/lib/hyrox";
+import { benchmarkToRace, bestErg1k, erg1kEquivalent, opportunities, predictHyrox, reference, simKind, REFERENCE, type PredictionInput } from "@/lib/hyrox";
 
 const base: PredictionInput = {
   division: "open_men",
@@ -125,5 +125,28 @@ describe("divisions", () => {
   it("scales benchmarks to the weights a doubles division uses", () => {
     const b = { date: "2026-09-01", station: "sled_push" as const, time_s: 100, amount: null, load_kg: 152, fresh: false };
     expect(benchmarkToRace(b, "pro_doubles_men")).toBeCloseTo(100 * (202 / 152), 5);
+  });
+});
+
+describe("sims", () => {
+  it("recognises sim names", () => {
+    expect(simKind("Hyrox sim", 70 * 60)).toBe("full");
+    expect(simKind("HYROX Simulation 🔥", 80 * 60)).toBe("full");
+    expect(simKind("Half sim", 40 * 60)).toBe("half");
+    expect(simKind("Sim", 30 * 60)).toBe("half");
+    expect(simKind("Simon's run club", 60 * 60)).toBeNull();
+    expect(simKind("Hyrox class", 60 * 60)).toBeNull();
+  });
+
+  it("pulls the prediction down to a faster recent full sim", () => {
+    const base = { division: "open_men" as const, asOf: "2026-10-24", tenKPace: 240, skiSessions: [], rowSessions: [], benchmarks: [], hyroxSessions: [] };
+    const modelled = predictHyrox(base).total;
+    const p = predictHyrox({ ...base, simTotals: [{ date: "2026-10-10", total: modelled - 300, label: "sim" }] });
+    expect(p.total).toBe(modelled - 300);
+    expect(p.simAnchor?.modelled).toBeCloseTo(modelled);
+    expect(p.segments.reduce((a, s) => a + s.time, 0)).toBeCloseTo(modelled - 300);
+    // Slower sims, and sims outside the window, don't change it.
+    expect(predictHyrox({ ...base, simTotals: [{ date: "2026-10-10", total: modelled + 300, label: "sim" }] }).total).toBe(modelled);
+    expect(predictHyrox({ ...base, simTotals: [{ date: "2026-01-10", total: modelled - 300, label: "sim" }] }).total).toBe(modelled);
   });
 });

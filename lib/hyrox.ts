@@ -219,6 +219,8 @@ export interface Prediction {
   runPenaltySource: string;
   /** Share of predicted time that comes from your own data (0–1). */
   confidence: number;
+  /** A recent full sim faster than the segment model: the prediction is pulled down to it. */
+  simAnchor?: { date: string; total: number; label: string; modelled: number };
 }
 
 export interface PredictionInput {
@@ -238,6 +240,20 @@ export interface PredictionInput {
   fallbackDays?: number;
   /** Race finish times without splits (e.g. a HYROX race recorded on Strava). */
   raceTotals?: { date: string; total: number; label: string }[];
+  /** Full HYROX simulation finish times (Strava sessions named "sim"/"simulation", or logged sims). */
+  simTotals?: { date: string; total: number; label: string }[];
+}
+
+/** Session names that mean a HYROX simulation: "Hyrox sim", "Simulation", "half sim"… */
+export const SIM_NAME = /\bsim(ulation)?s?\b/i;
+
+/** "full" for a whole race simulation, "half" for a half sim, null if it doesn't look like either. */
+export function simKind(name: string | null, durationS: number): "full" | "half" | null {
+  if (!SIM_NAME.test(name ?? "")) return null;
+  if (/half|1\/2|mini/i.test(name ?? "")) return "half";
+  if (durationS >= 45 * 60 && durationS <= 150 * 60) return "full";
+  if (durationS >= 20 * 60 && durationS < 45 * 60) return "half";
+  return null;
 }
 
 /** Total of a reference level, seconds. */
@@ -370,9 +386,29 @@ export function predictHyrox(input: PredictionInput): Prediction {
     reference: { average: ref.average.roxzone, fast: ref.fast.roxzone },
   });
 
-  const total = segments.reduce((a, s) => a + s.time, 0);
+  const modelled = segments.reduce((a, s) => a + s.time, 0);
   const sd = Math.sqrt(segments.reduce((a, s) => a + (s.time * (s.stale ? 0.1 : UNCERTAINTY[s.source])) ** 2, 0));
   const own = segments.filter((s) => s.source !== "reference").reduce((a, s) => a + s.time, 0);
+
+  // A full sim in the current window is direct proof of what you can do: if it beats the
+  // segment model, pull the prediction down to it (segments scaled to keep their shares).
+  const bestSim = (input.simTotals ?? []).filter((s) => inWindow(s.date)).sort((a, b) => a.total - b.total)[0];
+  if (bestSim && bestSim.total < modelled) {
+    const k = bestSim.total / modelled;
+    const scaled = segments.map((s) => ({ ...s, time: s.time * k }));
+    const spread = Math.max(sd * k, bestSim.total * UNCERTAINTY["race/sim"]);
+    return {
+      total: bestSim.total,
+      low: bestSim.total - spread,
+      high: bestSim.total + spread,
+      segments: scaled,
+      runPenalty,
+      runPenaltySource,
+      confidence: Math.max(own / modelled, 0.9),
+      simAnchor: { ...bestSim, modelled },
+    };
+  }
+  const total = modelled;
   return { total, low: total - sd, high: total + sd, segments, runPenalty, runPenaltySource, confidence: own / total };
 }
 

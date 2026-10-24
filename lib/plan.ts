@@ -19,7 +19,7 @@ const GARMIN_RUN = ["running", "treadmill_running", "indoor_running", "track_run
 export function categorize(sport: string, name: string | null, focus?: string | null, entries?: Entry[] | null, garminType?: string | null): Category {
   if (focus === "hyrox" || focus === "race") return "hyrox";
   if (focus === "strength") return "strength";
-  if (sport === "HYROX" || /hyrox|\bsim\b|compromised|roxzone|wall ?balls?|sled/i.test(name ?? "")) return "hyrox";
+  if (sport === "HYROX" || /hyrox|\bsim(ulation)?s?\b|compromised|roxzone|wall ?balls?|sled/i.test(name ?? "")) return "hyrox";
   // Garmin knows a treadmill run is a run even when Strava files it as "Workout".
   if (RUN.includes(sport) || GARMIN_RUN.includes(garminType ?? "")) return "run";
   if (ERG.includes(sport)) return "erg";

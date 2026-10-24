@@ -34,6 +34,7 @@ import {
   type HyroxSplits,
   type Benchmark,
   type Prediction,
+  simKind,
 } from "./hyrox";
 import { categorize, timeOffStatus, weeklyPlan, type SessionSummary, type TimeOff } from "./plan";
 import { recoveryStatus, todayCall, type RecoveryDay } from "./recovery";
@@ -365,13 +366,46 @@ function hyroxResults(e: Everything): HyroxResult[] {
     .sort((a, b) => (a.date < b.date ? 1 : -1));
 }
 
+export interface SimResult {
+  id: string;
+  date: string;
+  name: string;
+  total: number;
+  kind: "full" | "half";
+  fromStrava: boolean;
+}
+
+/**
+ * HYROX simulations: sessions named "sim"/"simulation" (e.g. "Hyrox sim" from Strava),
+ * plus sims logged here with splits. Full sims feed the prediction (singles only).
+ */
+function simResults(e: Everything): SimResult[] {
+  const out: SimResult[] = [];
+  for (const a of e.activities) {
+    if (a.excluded || a.focus === "race") continue;
+    const date = localDate(a.start_time);
+    if (a.sport === "HYROX") {
+      const kind = (a.details as unknown as HyroxSplits | null)?.kind;
+      if (kind === "full_sim" || kind === "half_sim") out.push({ id: a.id, date, name: a.name ?? "HYROX sim", total: a.duration_s, kind: kind === "full_sim" ? "full" : "half", fromStrava: false });
+      continue;
+    }
+    // Elapsed time for a sim: the clock runs through the Roxzone.
+    const kind = simKind(a.name, a.duration_s);
+    if (kind) out.push({ id: a.id, date, name: a.name ?? "Sim", total: a.duration_s, kind, fromStrava: a.source === "strava" });
+  }
+  // The same sim logged with splits and recorded on Strava: keep the logged one.
+  return out
+    .filter((s) => !s.fromStrava || !out.some((o) => !o.fromStrava && o.kind === s.kind && Math.abs(Date.parse(o.date) - Date.parse(s.date)) <= 86400000))
+    .sort((a, b) => (a.date < b.date ? 1 : -1));
+}
+
 /**
  * Strava activities named like HYROX that might be races (45–150 min) but aren't confirmed
  * either way — shown on the HYROX page with "race / not a race" buttons.
  */
 function possibleRaces(e: Everything, results: HyroxResult[]) {
   return e.activities
-    .filter((a) => a.sport !== "HYROX" && !a.focus && !a.excluded && /hyrox|doubles|relay/i.test(a.name ?? ""))
+    .filter((a) => a.sport !== "HYROX" && !a.focus && !a.excluded && /hyrox|doubles|relay/i.test(a.name ?? "") && !simKind(a.name, a.duration_s))
     .filter((a) => {
       const dur = a.moving_s ?? a.duration_s;
       return dur >= 45 * 60 && dur <= 150 * 60;
@@ -405,6 +439,12 @@ function predictAt(e: Everything, runs: ActivityRow[], sims: HyroxSession[], dat
     raceTotals: hyroxResults(e)
       .filter((r) => !r.hasSplits && r.division === div)
       .map((r) => ({ date: r.date, total: r.total, label: r.fromStrava ? "race on Strava" : "race" })),
+    // Sims are solo efforts, so they only speak for singles.
+    simTotals: doubles
+      ? []
+      : simResults(e)
+          .filter((s) => s.kind === "full")
+          .map((s) => ({ date: s.date, total: s.total, label: s.fromStrava ? `sim on Strava ("${s.name}")` : "logged full sim" })),
   });
 }
 
@@ -575,6 +615,7 @@ export async function hyroxData(divisionParam?: string) {
   }
   const sessions = e.activities.filter((a) => a.sport === "HYROX");
   return {
+    sims: simResults(e).slice(0, 12),
     division,
     categories,
     results,
