@@ -125,6 +125,7 @@ npm run garmin -- --debug      # show Garmin's raw responses if something looks 
 ```
 
 - **What you need:** Python 3.12 or newer. macOS comes with 3.9, so install a newer one with `brew install python@3.12` or from python.org. The first run creates a `.venv-garmin` folder and installs the [`garminconnect`](https://github.com/cyberjunky/python-garminconnect) library into it. If setup is interrupted, the next run repairs it.
+- **Syncing from your phone:** after one run of `npm run garmin`, the login is also saved to your database, and the app's **↻ Sync** button fetches Strava *and* Garmin in one go, with no computer needed. If Sync ever says the Garmin login expired, run `npm run garmin` once more. This needs the `garmin_auth` table, so run `supabase/schema.sql` again first.
 - **Logging in:** the first run asks for your Garmin email, password and MFA code if you use one. After that, login tokens are saved in `~/.garminconnect`, so your password isn't stored. To avoid the prompt, you can instead put `GARMIN_EMAIL` and `GARMIN_PASSWORD` in `.env.local`.
 - **Run it each morning**, or schedule it on your Mac, e.g. `crontab -e` and add:
   `30 7 * * * cd /path/to/training-hub && npm run garmin >> garmin.log 2>&1`

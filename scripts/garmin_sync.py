@@ -22,6 +22,7 @@ Usage (from the training-hub folder):
 from __future__ import annotations
 
 import argparse
+import contextlib
 import getpass
 import json
 import os
@@ -110,6 +111,34 @@ class Supabase:
         rows = self.request("GET", "/activities?select=id&garmin_load=not.is.null&limit=1", prefer="")
         return bool(rows)
 
+    def garmin_tokens(self) -> str | None:
+        """Tokens saved by a previous run (the web app may have refreshed them since)."""
+        req = urllib.request.Request(
+            self.base + "/garmin_auth?id=eq.1&select=tokens",
+            headers={"apikey": self.key, "Authorization": f"Bearer {self.key}"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as res:
+                rows = json.loads(res.read().decode() or "[]")
+        except urllib.error.HTTPError:
+            return None  # table not created yet — run supabase/schema.sql
+        return json.dumps(rows[0]["tokens"]) if rows and rows[0].get("tokens") else None
+
+    def save_garmin_tokens(self, tokens: str, display_name: str | None) -> bool:
+        req = urllib.request.Request(
+            self.base + "/garmin_auth?on_conflict=id",
+            method="POST",
+            data=json.dumps({"id": 1, "tokens": json.loads(tokens), "display_name": display_name,
+                             "updated_at": datetime.now(timezone.utc).isoformat()}).encode(),
+            headers={"apikey": self.key, "Authorization": f"Bearer {self.key}", "Content-Type": "application/json",
+                     "Prefer": "resolution=merge-duplicates,return=minimal"},
+        )
+        try:
+            urllib.request.urlopen(req, timeout=30).close()
+            return True
+        except urllib.error.HTTPError:
+            return False
+
     def last_garmin_sync(self) -> str | None:
         rows = self.request("GET", "/athlete?id=eq.1&select=garmin_synced_at", prefer="")
         return rows[0].get("garmin_synced_at") if isinstance(rows, list) and rows else None
@@ -119,8 +148,17 @@ class Supabase:
 # Garmin
 # ---------------------------------------------------------------------------
 
-def login(env: dict[str, str]) -> Garmin:
+def login(env: dict[str, str], db: Supabase) -> Garmin:
     """Logs in with saved tokens, falling back to email/password (+ MFA prompt) once."""
+    # The web app refreshes the tokens it shares with this script, so prefer its copy.
+    shared = db.garmin_tokens()
+    if shared:
+        try:
+            api = Garmin()
+            api.login(shared)
+            return api
+        except Exception:  # noqa: BLE001 — fall back to the local token file
+            pass
     try:
         api = Garmin()
         api.login(TOKENSTORE)
@@ -278,11 +316,16 @@ def main() -> None:
     db = Supabase(env["SUPABASE_URL"], env["SUPABASE_SERVICE_ROLE_KEY"])
 
     try:
-        api = login(env)
+        api = login(env, db)
     except GarminConnectAuthenticationError as e:
         sys.exit(f"Garmin login failed: {e}")
     except GarminConnectConnectionError as e:
         sys.exit(f"Could not reach Garmin Connect: {e}")
+
+    # Share the login with the web app so its Sync button can fetch Garmin data too.
+    with contextlib.suppress(Exception):
+        api.client.dump(TOKENSTORE)
+    linked = db.save_garmin_tokens(api.client.dumps(), getattr(api, "display_name", None))
 
     days = args.days or (7 if db.last_garmin_sync() else 30)
     today = date.today()
@@ -317,6 +360,10 @@ def main() -> None:
     preds = [(label, fields[col]) for label, col in (("5K", "garmin_pred_5k"), ("10K", "garmin_pred_10k"), ("Half", "garmin_pred_half"), ("Marathon", "garmin_pred_marathon")) if col in fields]
     if preds:
         print("Race predictor: " + "  ".join(f"{label} {v // 3600}:{v % 3600 // 60:02d}:{v % 60:02d}" if v >= 3600 else f"{label} {v // 60}:{v % 60:02d}" for label, v in preds))
+    if linked:
+        print("Linked to the web app — the Sync button now fetches Garmin data too.")
+    else:
+        print("Couldn't link to the web app: run supabase/schema.sql in Supabase, then run this again.")
     print(f"Training load: matched {matched} of {total} Garmin activities to your Strava sessions.")
     if total and matched < total:
         print("  (Unmatched ones aren't on Strava yet — sync Strava in the app, then run this again.)")

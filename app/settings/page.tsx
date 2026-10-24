@@ -31,7 +31,11 @@ const CONFIG = [
 
 export default async function Settings({ searchParams }: { searchParams: Promise<{ saved?: string; strava?: string; reanalyse?: string }> }) {
   const sp = await searchParams;
-  const [a, { data: strava }] = await Promise.all([getAthlete(), db().from("strava_auth").select("athlete_name, last_sync_at").eq("id", 1).maybeSingle()]);
+  const [a, { data: strava }, { data: garminLink }] = await Promise.all([
+    getAthlete(),
+    db().from("strava_auth").select("athlete_name, last_sync_at").eq("id", 1).maybeSingle(),
+    db().from("garmin_auth").select("updated_at").eq("id", 1).maybeSingle(),
+  ]);
   return (
     <div className="mx-auto max-w-lg space-y-4">
       <h1 className="text-2xl font-bold">Settings</h1>
@@ -69,6 +73,11 @@ export default async function Settings({ searchParams }: { searchParams: Promise
                 </div>
               )}
             </div>
+            <p className="text-xs text-muted">
+              {garminLink
+                ? "Linked — the Sync button fetches Garmin too. If it says the login expired, run npm run garmin on your computer once."
+                : "Not linked to the web app yet: run supabase/schema.sql in Supabase, then npm run garmin once on your computer. After that the Sync button fetches Garmin too."}
+            </p>
             {a.garmin_lt_hr && a.garmin_lt_hr !== a.threshold_hr && (
               <form action={applyGarminThresholdHr}>
                 <button className="btn-ghost w-full whitespace-normal text-sm">Use Garmin threshold HR: {a.garmin_lt_hr} bpm (now {a.threshold_hr})</button>
@@ -77,7 +86,7 @@ export default async function Settings({ searchParams }: { searchParams: Promise
           </>
         ) : (
           <p className="text-sm text-muted">
-            Not connected. Run <code className="rounded bg-bg px-1">npm run garmin</code> on your computer to import HRV, sleep, resting HR, Body Battery and your Garmin lactate threshold (see README).
+            Not connected. Run <code className="rounded bg-bg px-1">npm run garmin</code> on your computer once to log in (see README). After that, the Sync button imports HRV, sleep, resting HR, Body Battery and your lactate threshold from here.
           </p>
         )}
       </div>

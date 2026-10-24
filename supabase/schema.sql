@@ -167,7 +167,16 @@ alter table athlete add column if not exists garmin_load_scale numeric;
 alter table activities add column if not exists strava_best_efforts jsonb;
 alter table athlete add column if not exists show_predictions boolean not null default false;
 
+-- Garmin login tokens, so the app can sync Garmin itself (written by `npm run garmin`).
+create table if not exists garmin_auth (
+  id int primary key default 1 check (id = 1),
+  tokens jsonb not null,
+  display_name text,
+  updated_at timestamptz default now()
+);
+
 alter table strava_auth enable row level security;
+alter table garmin_auth enable row level security;
 alter table athlete enable row level security;
 alter table activities enable row level security;
 alter table checkins enable row level security;

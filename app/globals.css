@@ -80,3 +80,26 @@ body {
 @utility tabular {
   font-variant-numeric: tabular-nums;
 }
+
+/* Sync loading screen */
+@keyframes sync-spin { to { transform: rotate(360deg); } }
+@keyframes sync-swing { from { transform: rotate(-38deg); } to { transform: rotate(38deg); } }
+@keyframes sync-bob { 50% { transform: translateY(-5px); } }
+@keyframes sync-dash { to { stroke-dashoffset: 40; } }
+@keyframes sync-ecg { from { stroke-dashoffset: 130; } to { stroke-dashoffset: 0; } }
+@keyframes sync-wind { from { transform: translateX(14px); opacity: 0; } 40% { opacity: 0.6; } to { transform: translateX(-18px); opacity: 0; } }
+.sync-spin { animation: sync-spin 0.8s linear infinite; }
+.sync-body { animation: sync-bob 0.3s ease-in-out infinite; }
+.sync-limb { animation: sync-swing 0.6s ease-in-out infinite alternate; }
+.sync-b { animation-direction: alternate-reverse; }
+.sync-dash { animation: sync-dash 0.35s linear infinite; }
+.sync-wind { animation: sync-wind 0.7s linear infinite; }
+.sync-ecg { stroke-dasharray: 30 100; animation: sync-ecg 1.4s linear infinite; }
+.sync-runner.is-done .sync-body,
+.sync-runner.is-done .sync-limb,
+.sync-runner.is-done .sync-dash,
+.sync-runner.is-done .sync-wind,
+.sync-runner.is-done .sync-ecg { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) {
+  .sync-body, .sync-limb, .sync-dash, .sync-wind, .sync-ecg { animation: none; }
+}
