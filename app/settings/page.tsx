@@ -16,6 +16,19 @@ function Num({ name, label, value, hint }: { name: string; label: string; value:
   );
 }
 
+const CONFIG = [
+  { name: "APP_PASSWORD", what: "Sign-in password", required: true },
+  { name: "SESSION_SECRET", what: "Keeps you signed in", required: true },
+  { name: "APP_URL", what: "This site's address (for the Strava login)", required: true },
+  { name: "SUPABASE_URL", what: "Database address", required: true },
+  { name: "SUPABASE_SERVICE_ROLE_KEY", what: "Database key", required: true },
+  { name: "STRAVA_CLIENT_ID", what: "Strava app ID", required: true },
+  { name: "STRAVA_CLIENT_SECRET", what: "Strava app secret", required: true },
+  { name: "STRAVA_WEBHOOK_VERIFY_TOKEN", what: "Automatic Strava updates", required: false },
+  { name: "APP_TIMEZONE", what: "Your time zone, e.g. Europe/London", required: false },
+  { name: "ANTHROPIC_API_KEY", what: "Reading workout photos", required: false },
+];
+
 export default async function Settings({ searchParams }: { searchParams: Promise<{ saved?: string; strava?: string; reanalyse?: string }> }) {
   const sp = await searchParams;
   const [a, { data: strava }] = await Promise.all([getAthlete(), db().from("strava_auth").select("athlete_name, last_sync_at").eq("id", 1).maybeSingle()]);
@@ -140,6 +153,32 @@ export default async function Settings({ searchParams }: { searchParams: Promise
 
         <button className="btn-primary w-full">Save settings</button>
       </form>
+
+      <details className="card text-sm">
+        <summary className="cursor-pointer font-semibold">Configuration check</summary>
+        <p className="mt-2 text-xs text-muted">
+          Which settings this deployment can see (values are never shown).
+          {process.env.VERCEL_ENV ? ` Running as Vercel “${process.env.VERCEL_ENV}”${process.env.VERCEL_GIT_COMMIT_SHA ? `, commit ${process.env.VERCEL_GIT_COMMIT_SHA.slice(0, 7)}` : ""}.` : " Running locally."}
+        </p>
+        <ul className="mt-2 divide-y divide-border">
+          {CONFIG.map((c) => {
+            const v = process.env[c.name];
+            const state = !v ? "missing" : v.trim() !== v ? "has spaces" : "set";
+            return (
+              <li key={c.name} className="flex items-center justify-between gap-2 py-1.5">
+                <span>
+                  <code>{c.name}</code>
+                  <span className="block text-xs text-muted">{c.what}</span>
+                </span>
+                <span className="shrink-0 font-semibold" style={{ color: state === "set" ? "var(--good)" : c.required ? "var(--bad)" : "var(--warn)" }}>
+                  {state === "set" ? "✓ set" : state === "has spaces" ? "⚠ has spaces" : c.required ? "✕ missing" : "– not set"}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+        <p className="mt-2 text-xs text-muted">After changing variables in Vercel, redeploy — running deployments keep the values they started with.</p>
+      </details>
 
       <form action="/api/auth/logout" method="post">
         <button className="btn-ghost w-full">Sign out</button>

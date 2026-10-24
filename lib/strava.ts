@@ -120,7 +120,7 @@ export function isRun(sportType: string): boolean {
 }
 
 function requireEnv(name: string): string {
-  const v = process.env[name];
-  if (!v) throw new Error(`${name} must be set`);
+  const v = process.env[name]?.trim();
+  if (!v) throw new Error(`${name} isn't set on this deployment — see Settings → Configuration check`);
   return v;
 }
