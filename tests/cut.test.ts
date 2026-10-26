@@ -45,7 +45,7 @@ describe("cut planning", () => {
   it("fuels hard days and race weeks", () => {
     expect(fuelAdvice("deficit", "push").deficit).toBe(false);
     expect(fuelAdvice("deficit", "rest").deficit).toBe(true);
-    expect(fuelAdvice("race-week", "rest", "Dublin", 2).detail).toMatch(/carbs/);
+    expect(fuelAdvice("race-week", "rest", "Dublin", 2).detail).toMatch(/Carb load/);
     expect(proteinTarget(78)).toBe(155);
   });
 });

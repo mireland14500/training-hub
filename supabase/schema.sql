@@ -223,6 +223,7 @@ create table if not exists races (
   date date not null,
   created_at timestamptz default now()
 );
+alter table races add column if not exists start_time text;
 
 alter table strava_auth enable row level security;
 alter table weigh_ins enable row level security;

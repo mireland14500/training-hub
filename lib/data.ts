@@ -534,7 +534,13 @@ function runKind(a: ActivityRow): "threshold" | "intervals" | "long" | null {
 
 /** Today: recovery against your baseline, Push / Easy / Rest, and this week's training call. */
 export async function todayData() {
-  const [e, strava] = await Promise.all([loadEverything(), db().from("strava_auth").select("athlete_name, last_sync_at").eq("id", 1).maybeSingle()]);
+  const [e, strava, racesRes] = await Promise.all([
+    loadEverything(),
+    db().from("strava_auth").select("athlete_name, last_sync_at").eq("id", 1).maybeSingle(),
+    db().from("races").select("name, date").gte("date", today()).order("date").limit(1),
+  ]);
+  // Next race from the race list (Body tab); fine if the table doesn't exist yet.
+  const nextRace = racesRes.error ? null : (racesRes.data?.[0] as { name: string; date: string } | undefined) ?? null;
   const { athlete, activities, checkins } = e;
   const counted = activities.filter((a) => !a.excluded);
   const runs = activities.filter((a) => isRun(a.sport));
@@ -578,6 +584,7 @@ export async function todayData() {
     last7: { threshold: kinds.includes("threshold"), intervals: kinds.includes("intervals"), long: kinds.includes("long") },
     paces: paceZones ? { easy: mid("Easy"), threshold: mid("Threshold"), interval: mid("Interval") } : null,
     easyHrMax: hrZoneBounds(athlete.threshold_hr)[1].max,
+    race: nextRace ? { name: nextRace.name, daysTo: Math.round((Date.parse(nextRace.date) - Date.parse(t)) / 86400000) } : null,
   });
 
   // Weekly call (add / hold / reduce …), aimed at running unless HYROX predictions are switched on.
@@ -585,10 +592,13 @@ export async function todayData() {
   for (const a of counted) if (a.zone_seconds && localDate(a.start_time) >= daysAgo(27)) a.zone_seconds.forEach((s, i) => (zones[i] += s));
   const zoneTotal = zones.reduce((a, b) => a + b, 0);
   const hardShare = zoneTotal > 0 ? (zones[2] + zones[3] + zones[4]) / zoneTotal : null;
-  const goal =
-    athlete.goal_date && athlete.goal_date >= t
-      ? { name: athlete.goal_name ?? "Goal race", date: athlete.goal_date, daysTo: Math.round((Date.parse(athlete.goal_date) - Date.parse(t)) / 86400000) }
-      : null;
+  // The sooner of the Settings goal race and the next race on your list.
+  const candidates = [
+    athlete.goal_date && athlete.goal_date >= t ? { name: athlete.goal_name ?? "Goal race", date: athlete.goal_date } : null,
+    nextRace,
+  ].filter((g): g is { name: string; date: string } => !!g);
+  const soonest = candidates.sort((a, b) => a.date.localeCompare(b.date))[0];
+  const goal = soonest ? { ...soonest, daysTo: Math.round((Date.parse(soonest.date) - Date.parse(t)) / 86400000) } : null;
   const sessions: SessionSummary[] = counted
     .filter((a) => localDate(a.start_time) >= daysAgo(34))
     .map((a) => ({

@@ -487,8 +487,18 @@ export async function saveRace(form: FormData) {
   const name = str(form, "name");
   const date = str(form, "date");
   if (!name || !date || !ISO_DATE.test(date)) throw new Error("Race name and date are required");
-  const { error } = await db().from("races").insert({ name, date });
+  const time = str(form, "start_time");
+  const start_time = time && /^\d{2}:\d{2}$/.test(time) ? time : null;
+  const { error } = await db().from("races").insert(start_time ? { name, date, start_time } : { name, date });
   if (error) throw new Error(error.message);
+  revalidatePath("/", "layout");
+}
+
+export async function setRaceTime(form: FormData) {
+  const id = str(form, "id");
+  const time = str(form, "start_time");
+  if (!id) return;
+  await db().from("races").update({ start_time: time && /^\d{2}:\d{2}$/.test(time) ? time : null }).eq("id", id);
   revalidatePath("/", "layout");
 }
 

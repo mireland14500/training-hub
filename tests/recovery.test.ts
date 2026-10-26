@@ -76,3 +76,23 @@ describe("running progress", () => {
     expect(windowChange(pts, "2026-10-23", 28)!.change).toBeCloseTo(318 - 329, 5);
   });
 });
+
+describe("race week", () => {
+  const m = () => recoveryStatus(history({}), "2026-10-23");
+  const race = (daysTo: number) => ({ name: "HYROX Birmingham", daysTo });
+  it("tapers instead of suggesting a big session", () => {
+    const c = todayCall(base(m(), { race: race(4) }));
+    expect(c.headline).toMatch(/Openers/);
+    expect(c.session).not.toMatch(/5 × 1 km/);
+    expect(todayCall(base(m(), { race: race(2) })).call).toBe("rest");
+    expect(todayCall(base(m(), { race: race(1) })).session).toMatch(/Carb load/);
+    expect(todayCall(base(m(), { race: race(0) })).headline).toMatch(/Race day/);
+    expect(todayCall(base(m(), { race: race(6) })).headline).toMatch(/sharpener/);
+  });
+  it("ignores races further out", () => {
+    expect(todayCall(base(m(), { race: race(10) })).headline).toMatch(/quality session/);
+  });
+  it("still rests when recovery is red", () => {
+    expect(todayCall(base(recoveryStatus(history({ hrv: 42, rhr: 56 }), "2026-10-23"), { race: race(4) })).call).toBe("rest");
+  });
+});

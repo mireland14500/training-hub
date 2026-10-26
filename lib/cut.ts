@@ -7,6 +7,8 @@ export interface Race {
   id?: string;
   name: string;
   date: string;
+  /** Wave start, "HH:MM" local time. */
+  start_time?: string | null;
 }
 
 export interface BodyGoal {
@@ -129,7 +131,7 @@ export function fuelAdvice(phase: Phase, call: "push" | "easy" | "rest" | null, 
     case "race-week":
       return {
         headline: `No deficit — ${raceName ?? "race"} in ${daysTo} day${daysTo === 1 ? "" : "s"}`,
-        detail: (daysTo ?? 7) <= 2 ? "Top up carbs (about 6–8 g per kg) for the last two days; keep fibre and fat lower." : "Eat at maintenance so you arrive with full glycogen. Dieting now costs more on the course than it saves on the scale.",
+        detail: (daysTo ?? 7) <= 2 ? "Carb load: about 8 g per kg the day before, low in fibre and fat — your plan has the meals." : "Eat at maintenance so you arrive with full glycogen. Dieting now costs more on the course than it saves on the scale.",
         deficit: false,
       };
     case "recover":

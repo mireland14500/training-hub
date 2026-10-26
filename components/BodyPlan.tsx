@@ -3,6 +3,7 @@ import { formatPace } from "@/lib/analysis";
 import { paceEffectOfFat } from "@/lib/body";
 import { leanFloor, suggestedTarget, weeklyRatePct } from "@/lib/cut";
 import type { loadBodyPlan } from "@/lib/bodyplan";
+import Link from "next/link";
 import WeightPlanChart from "./WeightPlanChart";
 
 type Plan = Awaited<ReturnType<typeof loadBodyPlan>>;
@@ -54,6 +55,11 @@ export default function BodyPlan({ plan, ltSpeed, sex }: { plan: Plan; ltSpeed: 
         </div>
         <h2 className="mt-1.5 text-lg font-bold leading-snug">{fuel.headline}</h2>
         <p className="mt-1 text-sm text-muted">{fuel.detail}</p>
+        {(phase.phase === "race-week" || phase.phase === "race-day") && phase.race?.id && (
+          <Link href={`/race/${phase.race.id}`} className="btn-primary mt-3 w-full text-sm">
+            Countdown & carb-load plan →
+          </Link>
+        )}
         {plan.protein && <p className="mt-2 text-sm"><b className="tabular">{plan.protein} g protein</b> <span className="text-muted">(about 2 g per kg) — keeps the muscle while the fat comes off</span></p>}
       </section>
 
@@ -149,9 +155,14 @@ export default function BodyPlan({ plan, ltSpeed, sex }: { plan: Plan; ltSpeed: 
           <ul className="divide-y divide-border">
             {plan.races.map((r) => (
               <li key={r.id} className="flex items-center justify-between gap-3 py-2 text-sm">
-                <span>
-                  <b>{r.name}</b> <span className="text-muted">· {fmtDate(r.date)}</span>
-                </span>
+                <Link href={`/race/${r.id}`} className="min-w-0 hover:text-accent">
+                  <b>{r.name}</b>{" "}
+                  <span className="text-muted">
+                    · {fmtDate(r.date)}
+                    {r.start_time ? ` · ${r.start_time}` : ""}
+                  </span>{" "}
+                  <span className="text-xs text-accent">countdown & fuel plan →</span>
+                </Link>
                 <form action={deleteRace}>
                   <input type="hidden" name="id" value={r.id} />
                   <button className="text-muted hover:text-bad" aria-label={`Remove ${r.name}`}>✕</button>
@@ -162,7 +173,10 @@ export default function BodyPlan({ plan, ltSpeed, sex }: { plan: Plan; ltSpeed: 
         )}
         <form action={saveRace} className="grid grid-cols-[1fr_auto] gap-2">
           <input name="name" required placeholder="e.g. HYROX Dublin" className="input col-span-2" aria-label="Race name" />
-          <input name="date" type="date" required className="input min-w-0" aria-label="Race date" />
+          <div className="grid min-w-0 grid-cols-[1fr_6.5rem] gap-2">
+            <input name="date" type="date" required className="input min-w-0" aria-label="Race date" />
+            <input name="start_time" type="time" className="input min-w-0" aria-label="Wave start time (optional)" />
+          </div>
           <button className="btn-ghost px-4">Add race</button>
         </form>
         <p className="text-xs text-muted">No deficit in the 6 days before a race, and 3 recovery days after.</p>

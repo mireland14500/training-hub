@@ -99,6 +99,8 @@ export interface TodayInput {
   last7: { threshold: boolean; intervals: boolean; long: boolean };
   paces: { easy: string; threshold: string; interval: string } | null;
   easyHrMax: number | null;
+  /** Next race within a week: the call becomes a taper. */
+  race?: { name: string; daysTo: number } | null;
 }
 
 export interface TodayCall {
@@ -142,6 +144,21 @@ export function todayCall(i: TodayInput): TodayCall {
     return { call: red.length ? "rest" : amber.length ? "easy" : "push", headline: "You've trained today ✓", reasons: [...red, ...amber], session: "Recover well: eat, hydrate, sleep 8 h. Check back tomorrow." };
   }
   if (red.length) return { call: "rest", headline: "Rest today", reasons: red.concat(amber), session: "Rest, or a 20–30 min walk. Training through this slows your progress." };
+
+  // Race week: freshness beats fitness now — nothing you do this week makes you fitter by race day.
+  const r = i.race;
+  if (r && r.daysTo >= 0 && r.daysTo <= 6) {
+    const why = [`${r.name} ${r.daysTo === 0 ? "today" : `in ${r.daysTo} day${r.daysTo === 1 ? "" : "s"}`} — taper`, ...amber];
+    if (r.daysTo === 0)
+      return { call: "push", headline: "Race day — go get it", reasons: why, session: "Warm-up: 10 min easy jog, dynamic mobility, 3 × 20 s strides and a few wall balls / burpees 15 min before your wave." };
+    if (r.daysTo === 1) return { call: "easy", headline: "Day before — stay fresh", reasons: why, session: "Rest, or 15–20 min easy jog with 4 × 20 s strides. Carb load today." };
+    if (r.daysTo === 2) return { call: "rest", headline: "Rest day", reasons: why, session: "Full rest or a 20–30 min walk. Let the legs fill up." };
+    if (r.daysTo <= 4 && !amber.length)
+      return { call: "push", headline: "Openers — short and sharp", reasons: why, session: `20 min easy + 3 × 3 min${p ? ` at ${p.threshold}/km` : " at threshold"}, 2 min jog between, + 4 strides. Finish feeling you could do more.` };
+    if (!amber.length)
+      return { call: "push", headline: "Last sharpener", reasons: why, session: `2 × 10 min${p ? ` at ${p.threshold}/km` : " at threshold"} with 3 min easy — no longer. No heavy sleds or new exercises this week.` };
+    return { call: "easy", headline: "Easy — protect the taper", reasons: why, session: `Easy 25–35 min${p ? ` at ${p.easy}/km` : ""}. Skip anything hard this week.` };
+  }
   if (amber.length >= 2 || (amber.length === 1 && (hrv?.status === "low" || i.hardYesterday))) {
     return { call: "easy", headline: "Keep it easy today", reasons: amber, session: easySession };
   }

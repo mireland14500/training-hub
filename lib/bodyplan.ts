@@ -7,7 +7,7 @@ import { fuelAdvice, goalStatus, phaseOn, proteinTarget, targetWeight, weighInsT
 export async function loadBodyPlan(call: "push" | "easy" | "rest" | null) {
   const t = today();
   const [races, goal, weighIns, scans] = await Promise.all([
-    db().from("races").select("id, name, date").gte("date", daysAgo(3)).order("date"),
+    db().from("races").select("*").gte("date", daysAgo(3)).order("date"),
     db().from("body_goal").select("*").eq("id", 1).maybeSingle(),
     db().from("weigh_ins").select("date, weight_kg").gte("date", daysAgo(400)).order("date"),
     db().from("body_scans").select("date, weight_kg, body_fat_pct").gte("date", daysAgo(400)).order("date"),

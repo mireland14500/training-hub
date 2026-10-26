@@ -2,6 +2,7 @@ import Link from "next/link";
 import BandSparkline from "@/components/BandSparkline";
 import SyncButton from "@/components/SyncButton";
 import { loadBodyPlan } from "@/lib/bodyplan";
+import Countdown from "@/components/Countdown";
 import { todayData } from "@/lib/data";
 import type { Verdict } from "@/lib/plan";
 import type { Call, MetricStatus } from "@/lib/recovery";
@@ -75,6 +76,16 @@ export default async function Today() {
           <Link href="/settings" className="btn-ghost px-3 text-sm md:hidden" aria-label="Settings">⚙︎</Link>
         </div>
       </div>
+
+      {plan?.nextRace && (Date.parse(plan.nextRace.date) - Date.parse(plan.today)) / 86400_000 <= 21 && (
+        <Link href={`/race/${plan.nextRace.id}`} className="card flex items-center justify-between gap-3 border-accent hover:bg-accent/5">
+          <div className="min-w-0">
+            <div className="truncate text-xs font-semibold uppercase tracking-wide text-muted">{plan.nextRace.name}</div>
+            <Countdown date={plan.nextRace.date} startTime={plan.nextRace.start_time ?? null} size="sm" />
+          </div>
+          <span className="shrink-0 text-sm font-semibold text-accent">Fuel plan →</span>
+        </Link>
+      )}
 
       <section className="rounded-2xl border p-4" style={{ background: style.bg, borderColor: style.border }}>
         <div className="flex flex-wrap items-center gap-2.5">
