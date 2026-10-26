@@ -96,7 +96,7 @@ export async function getTemplates(): Promise<Template[]> {
 export function today(): string {
   return localDate(new Date());
 }
-function daysAgo(n: number): string {
+export function daysAgo(n: number): string {
   return localDate(new Date(Date.now() - n * 86400000));
 }
 function shift(date: string, days: number): string {

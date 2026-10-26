@@ -448,3 +448,52 @@ export async function markSim(form: FormData): Promise<{ changes: SimChange[]; e
     changes: keys.map((k) => ({ label: DIVISIONS[k as keyof typeof DIVISIONS], before: before[k] ?? null, after: after[k] ?? null })),
   };
 }
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+export async function saveWeighIn(form: FormData) {
+  const weight = num(form, "weight_kg");
+  const date = str(form, "date") ?? localDate(new Date().toISOString());
+  if (!weight || weight < 30 || weight > 250 || !ISO_DATE.test(date)) throw new Error("Enter your weight in kg");
+  const { error } = await db().from("weigh_ins").upsert({ date, weight_kg: weight }, { onConflict: "date" });
+  if (error) throw new Error(error.message);
+  revalidatePath("/", "layout");
+}
+
+export async function saveBodyGoal(form: FormData) {
+  const target = num(form, "target_fat_pct");
+  const weight = num(form, "start_weight");
+  const fat = num(form, "start_fat_pct");
+  const start = str(form, "start_date");
+  const end = str(form, "target_date");
+  if (!target || !weight || !fat || !start || !end || !ISO_DATE.test(start) || !ISO_DATE.test(end)) throw new Error("Fill in every field");
+  if (target >= fat) throw new Error("The target should be below your current body fat");
+  if (end <= start) throw new Error("The target date should be after the start date");
+  const { error } = await db()
+    .from("body_goal")
+    .upsert({ id: 1, target_fat_pct: target, start_weight: weight, start_fat_pct: fat, start_date: start, target_date: end, updated_at: new Date().toISOString() });
+  if (error) throw new Error(error.message);
+  revalidatePath("/", "layout");
+  redirect("/body");
+}
+
+export async function deleteBodyGoal() {
+  await db().from("body_goal").delete().eq("id", 1);
+  revalidatePath("/", "layout");
+  redirect("/body");
+}
+
+export async function saveRace(form: FormData) {
+  const name = str(form, "name");
+  const date = str(form, "date");
+  if (!name || !date || !ISO_DATE.test(date)) throw new Error("Race name and date are required");
+  const { error } = await db().from("races").insert({ name, date });
+  if (error) throw new Error(error.message);
+  revalidatePath("/", "layout");
+}
+
+export async function deleteRace(form: FormData) {
+  const id = str(form, "id");
+  if (id) await db().from("races").delete().eq("id", id);
+  revalidatePath("/", "layout");
+}

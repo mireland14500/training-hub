@@ -22,6 +22,11 @@ Data comes from:
 - Erg sessions logged from a photo of the monitor.
 - HYROX sims and races logged by hand, or from a results screenshot.
 - Station benchmarks (e.g. 100 wall balls in 5:40).
+- **Fat-loss plan (Body tab):**
+  - Set a body-fat goal timed to your next race, and log quick weigh-ins.
+  - Your 7-day average is tracked against the plan, with a weekly weigh-in count for accountability.
+  - A daily fuel call (deficit, fuel a hard day, race week or recover) uses your training call and your upcoming races.
+  - It shows what reaching the goal is worth on the run.
 - **Body:** InBody scans read from a photo of the result sheet or an app screenshot. Tracks weight, body fat and muscle trends and left/right leg balance, and gives a rough guide to how fat-mass changes affect your threshold pace.
 - A 20-second morning check-in with your Garmin HRV, sleep and Body Battery.
 

@@ -198,7 +198,36 @@ create table if not exists body_scans (
 );
 create index if not exists body_scans_date on body_scans (date);
 
+-- Quick weigh-ins (between InBody scans) for the body-fat goal.
+create table if not exists weigh_ins (
+  date date primary key,
+  weight_kg numeric not null,
+  created_at timestamptz default now()
+);
+
+-- One body-fat goal at a time, e.g. "12% by Dublin".
+create table if not exists body_goal (
+  id int primary key default 1 check (id = 1),
+  target_fat_pct numeric not null,
+  start_date date not null,
+  target_date date not null,
+  start_weight numeric not null,
+  start_fat_pct numeric not null,
+  updated_at timestamptz default now()
+);
+
+-- Upcoming races: no deficit in race week, recovery days after.
+create table if not exists races (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  date date not null,
+  created_at timestamptz default now()
+);
+
 alter table strava_auth enable row level security;
+alter table weigh_ins enable row level security;
+alter table body_goal enable row level security;
+alter table races enable row level security;
 alter table body_scans enable row level security;
 alter table garmin_auth enable row level security;
 alter table athlete enable row level security;

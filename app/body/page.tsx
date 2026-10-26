@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { deleteBodyScan } from "@/app/actions";
 import BandSparkline from "@/components/BandSparkline";
+import BodyPlan from "@/components/BodyPlan";
+import { loadBodyPlan } from "@/lib/bodyplan";
+import { todayData } from "@/lib/data";
 import { formatPace } from "@/lib/analysis";
 import { change, legImbalance, paceEffectOfFat, scanBefore, type Metric } from "@/lib/body";
 import { db, getAthlete, type BodyScanRow } from "@/lib/db";
@@ -32,7 +35,12 @@ const TILES: { key: Metric; label: string; unit: string; good: "up" | "down" | "
 ];
 
 export default async function Body() {
-  const [athlete, { data, error }] = await Promise.all([getAthlete(), db().from("body_scans").select("*").order("date", { ascending: true })]);
+  const [athlete, { data, error }, call] = await Promise.all([
+    getAthlete(),
+    db().from("body_scans").select("*").order("date", { ascending: true }),
+    todayData().then((d) => d.call.call).catch(() => null),
+  ]);
+  const plan = await loadBodyPlan(call);
   if (error) {
     return (
       <div className="card mx-auto mt-6 max-w-xl text-sm">
@@ -59,6 +67,7 @@ export default async function Body() {
     return (
       <div className="mx-auto max-w-xl space-y-3.5">
         {header}
+        <BodyPlan plan={plan} ltSpeed={athlete.garmin_lt_speed} sex={athlete.sex} />
         <div className="card space-y-2 text-sm text-muted">
           <p>Take a photo of your InBody result sheet, or screenshot the InBody app, and the numbers are read for you.</p>
           <p>Every scan adds to your weight, body fat and muscle trends, and shows roughly how changes in fat mass affect your running pace.</p>
@@ -79,6 +88,9 @@ export default async function Body() {
     <div className="mx-auto max-w-xl space-y-3.5">
       {header}
 
+      <BodyPlan plan={plan} ltSpeed={athlete.garmin_lt_speed} sex={athlete.sex} />
+
+      <div className="label pt-2">Latest InBody scan</div>
       <div className="grid grid-cols-3 gap-2.5">
         {TILES.map((t) => (
           <div key={t.key} className="card p-3">

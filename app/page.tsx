@@ -1,6 +1,7 @@
 import Link from "next/link";
 import BandSparkline from "@/components/BandSparkline";
 import SyncButton from "@/components/SyncButton";
+import { loadBodyPlan } from "@/lib/bodyplan";
 import { todayData } from "@/lib/data";
 import type { Verdict } from "@/lib/plan";
 import type { Call, MetricStatus } from "@/lib/recovery";
@@ -39,6 +40,7 @@ function Tile({ m, suffix }: { m: MetricStatus | undefined; suffix?: string }) {
 
 export default async function Today() {
   const d = await todayData();
+  const plan = await loadBodyPlan(d.call.call).catch(() => null);
 
   if (!d.stravaConnected && !d.hasActivities) {
     return (
@@ -90,6 +92,21 @@ export default async function Today() {
           </ul>
         )}
       </section>
+
+      {plan?.ready && (plan.goal || plan.races.length > 0) && (
+        <Link href="/body" className="card flex items-center justify-between gap-3 hover:border-accent">
+          <div className="min-w-0">
+            <div className="text-xs font-semibold uppercase tracking-wide text-muted">Fuel</div>
+            <div className="font-semibold">{plan.fuel.headline}</div>
+            <div className="text-xs text-muted">
+              {plan.status ? `${plan.status.status === "behind" ? "Behind plan" : plan.status.status === "ahead" ? "Ahead of plan" : "On track"} · 7-day avg ${plan.status.avg} kg` : ""}
+              {plan.status && !plan.weighedToday ? " · " : ""}
+              {!plan.weighedToday ? "Not weighed in today" : ""}
+            </div>
+          </div>
+          <span className="text-muted">→</span>
+        </Link>
+      )}
 
       <section className="card">
         <div className="flex items-baseline justify-between">
