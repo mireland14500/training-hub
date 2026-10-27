@@ -27,6 +27,10 @@ Data comes from:
   - Your 7-day average is tracked against the plan, with a weekly weigh-in count for accountability.
   - A daily fuel call (deficit, fuel a hard day, race week or recover) uses your training call and your upcoming races.
   - It shows what reaching the goal is worth on the run.
+- **Session analysis:** every run and HYROX session gets pace and heart-rate charts and a zone breakdown, with coach notes:
+  - Was the easy run actually easy? Was the threshold session on threshold pace?
+  - Reps are detected automatically, with HR recovery after each one. You also get HR drift, pacing splits, and pace compared with your usual pace at the same HR.
+  - For HYROX: time above threshold, HR through the race, run fade, compromised running, and each segment against a top-15% finisher.
 - **Race countdown and fuelling:** each race on your list gets a live countdown to your wave and a carb-load plan scaled to your weight. The day before is about 8 g/kg, split into meals with a tick-list. You also get breakfast timed to your wave, a pre-start top-up, a mid-race gel and recovery. In race week the daily call switches to a taper.
 - **Body:** InBody scans read from a photo of the result sheet or an app screenshot. Tracks weight, body fat and muscle trends and left/right leg balance, and gives a rough guide to how fat-mass changes affect your threshold pace.
 - A 20-second morning check-in with your Garmin HRV, sleep and Body Battery.

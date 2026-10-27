@@ -2,10 +2,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { deleteSession } from "@/app/actions";
 import { FOCUS_LABEL } from "@/components/categories";
+import SessionAnalysis from "@/components/SessionAnalysis";
 import SessionEditor from "@/components/SessionEditor";
 import SimControl from "@/components/SimControl";
 import { formatDuration, formatPace } from "@/lib/analysis";
-import { getActivity, localDate, simDivisions, templatesFor } from "@/lib/data";
+import { getActivity, localDate, sessionAnalysisData, simDivisions, templatesFor } from "@/lib/data";
 import { getAthlete } from "@/lib/db";
 import { DIVISIONS, SIM_NAME, simKind, type Division } from "@/lib/hyrox";
 import { isRun } from "@/lib/strava";
@@ -23,7 +24,7 @@ export default async function Session({ params }: { params: Promise<{ id: string
   const { id } = await params;
   const a = await getActivity(id);
   if (!a) notFound();
-  const [{ templates, suggestedId }, athlete] = await Promise.all([templatesFor(a), getAthlete()]);
+  const [{ templates, suggestedId }, athlete, analysis] = await Promise.all([templatesFor(a), getAthlete(), sessionAnalysisData(a).catch(() => null)]);
   // Offer the sim control on anything that could be one: named like a sim, already marked, or any
   // non-run session when HYROX predictions are on.
   const sim = await simDivisions(a);
@@ -52,6 +53,8 @@ export default async function Session({ params }: { params: Promise<{ id: string
         <p className="tabular mt-1 text-sm">{facts.join(" · ")}</p>
         {a.excluded && <p className="mt-1 text-xs text-warn">Merged into another logged session — not counted separately.</p>}
       </div>
+
+      {analysis && <SessionAnalysis data={analysis} distanceM={a.distance_m} movingS={a.moving_s ?? a.duration_s} decoupling={a.decoupling} trainer={a.trainer} />}
 
       <SessionEditor
         session={{ id: a.id, name: a.name, focus: a.focus, rpe: a.rpe, notes: a.notes, entries: a.entries, photoPath: a.photo_path }}

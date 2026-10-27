@@ -83,6 +83,8 @@ export interface ActivityRow {
   sim_time_s?: number | null;
   /** Category the sim was done in (e.g. "pro_doubles_men"); empty = your main division. */
   sim_division?: string | null;
+  /** Compact pace/HR timeline and km splits — see lib/streams.ts. */
+  stream_summary?: import("./streams").StreamSummary | null;
 }
 
 export interface AthleteRow {

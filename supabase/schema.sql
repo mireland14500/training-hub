@@ -169,6 +169,7 @@ alter table athlete add column if not exists show_predictions boolean not null d
 alter table activities add column if not exists sim_kind text check (sim_kind in ('full', 'half', 'none'));
 alter table activities add column if not exists sim_time_s int;
 alter table activities add column if not exists sim_division text;
+alter table activities add column if not exists stream_summary jsonb;
 
 -- Garmin login tokens, so the app can sync Garmin itself (written by `npm run garmin`).
 create table if not exists garmin_auth (

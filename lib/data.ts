@@ -55,7 +55,7 @@ import {
   type Volumes,
 } from "./workout";
 import { isRun } from "./strava";
-import { applyGarminLoadsIfNeeded } from "./sync";
+import { analyseActivity, applyGarminLoadsIfNeeded } from "./sync";
 
 const TZ = process.env.APP_TIMEZONE || "UTC";
 const dayFmt = new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" });
@@ -1185,5 +1185,71 @@ export async function runningProgress() {
     hasStravaBests: Object.keys(stravaBestsWithin(runs, "0000-01-01", t)).length > 0,
     quality,
     paces,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// One session's pace / heart-rate analysis
+// ---------------------------------------------------------------------------
+
+const EASY_NAME = /easy|recovery|z2|zone ?2|jog|shake ?out/i;
+
+/** Everything the session page needs to analyse pace and HR; fetches Strava streams once if missing. */
+export async function sessionAnalysisData(a: ActivityRow) {
+  let activity = a;
+  if (a.source === "strava" && !a.stream_summary && (a.avg_hr || a.distance_m) && a.stream_summary !== undefined) {
+    if (await analyseActivity(a.id)) activity = (await getActivity(a.id)) ?? a;
+  }
+  const [athlete, recent] = await Promise.all([getAthlete(), getActivities(400)]);
+  const t = { thresholdHr: athlete.threshold_hr, maxHr: athlete.max_hr, ltSpeed: athlete.garmin_lt_speed };
+  const date = localDate(activity.start_time);
+  const run = isRun(activity.sport) && (activity.distance_m ?? 0) > 500;
+
+  // A logged HYROX session with splits — the session itself, or one linked to this Strava recording.
+  const logged = activity.sport === "HYROX" ? activity : recent.find((x) => x.sport === "HYROX" && x.linked_activity_id === activity.id) ?? null;
+  const splits = (logged?.details as unknown as HyroxSplits | null) ?? null;
+  // HR for a logged session comes from the Strava recording it's linked to.
+  const recording = activity.sport === "HYROX" && activity.linked_activity_id ? recent.find((x) => x.id === activity.linked_activity_id) ?? null : activity;
+
+  const isHyrox =
+    !run &&
+    (activity.sport === "HYROX" || ["hyrox", "race"].includes(activity.focus ?? "") || !!(activity.sim_kind && activity.sim_kind !== "none") || /hyrox|\bsim(ulation)?\b/i.test(activity.name ?? "") || !!splits);
+
+  const runs = recent.filter((x) => isRun(x.sport));
+  const vdot = vdotAsOf(runs, athlete, today(), true);
+  const tenK = athlete.garmin_pred_10k && !athlete.threshold_pace_override ? Math.min(athlete.garmin_pred_10k, vdot ? predictTime(vdot, 10000) : Infinity) : vdot ? predictTime(vdot, 10000) : null;
+
+  let kind: "easy" | "long" | "recovery" | "threshold" | "intervals" | "race" | "steady" = "steady";
+  let baseline: { refHr: number; usual: number; thisRun: number | null } | null = null;
+  if (run) {
+    const rk = runKind(activity);
+    kind = activity.focus === "race" ? "race" : activity.focus === "recovery" ? "recovery" : activity.focus === "easy" || EASY_NAME.test(activity.name ?? "") ? "easy" : rk ?? "steady";
+    // Your usual pace at ~Z2 heart rate, from outdoor easy runs in the last 90 days (as on the Running tab).
+    const refHr = Math.round(athlete.threshold_hr * 0.85);
+    const near = (x: ActivityRow) => x.avg_hr && Math.abs(x.avg_hr - refHr) <= 20 && x.distance_m && (x.moving_s ?? x.duration_s) >= 20 * 60 && !x.trainer;
+    const usual = runs
+      .filter((x) => x.id !== activity.id && localDate(x.start_time) >= daysAgo(90) && near(x) && !runKind(x))
+      .map((x) => paceAtHr(x.distance_m!, x.moving_s ?? x.duration_s, x.avg_hr!, refHr))
+      .sort((p, q) => p - q);
+    if (usual.length >= 3) {
+      baseline = { refHr, usual: usual[Math.floor(usual.length / 2)], thisRun: near(activity) ? paceAtHr(activity.distance_m!, activity.moving_s ?? activity.duration_s, activity.avg_hr!, refHr) : null };
+    }
+  }
+
+  return {
+    date,
+    run,
+    isHyrox,
+    kind,
+    baseline,
+    thresholds: t,
+    summary: recording?.stream_summary ?? null,
+    avgHr: recording?.avg_hr ?? activity.avg_hr,
+    maxHr: recording?.max_hr ?? activity.max_hr,
+    zoneSeconds: recording?.zone_seconds ?? activity.zone_seconds,
+    splits,
+    division: (splits?.division ?? athlete.hyrox_division) as Division,
+    tenKPace: tenK ? tenK / 10 : null,
+    canFetch: activity.source === "strava" && !activity.stream_summary,
   };
 }

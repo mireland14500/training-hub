@@ -1,6 +1,7 @@
 import "server-only";
 import { bestEfforts, decoupling, efficiencyFactor, garminLoadScale, hrLoad, sessionLoad, zoneSeconds, type AthleteProfile } from "./analysis";
 import { db, getAthlete } from "./db";
+import { summarizeStreams } from "./streams";
 import { getActivity, getStreams, isRun, listActivities, StravaRateLimitError, type StravaActivity } from "./strava";
 
 const INITIAL_HISTORY_DAYS = 365;
@@ -65,8 +66,33 @@ async function processStreams(rowId: string, externalId: number, sport: string, 
   if (isRun(sport) && dist.length && !trainer && sport !== "VirtualRun") update.best_efforts = bestEfforts(time, dist);
   if (isRun(sport) && hr.length && dist.length && time[time.length - 1] >= 40 * 60) update.decoupling = decoupling(time, dist, hr);
   if (isRun(sport) && !trainer && sport !== "VirtualRun") update.strava_best_efforts = stravaBestEfforts(detail ?? (await getActivity(externalId)));
-  const { error } = await db().from("activities").update(update).eq("id", rowId);
+  if (hr.length || dist.length) update.stream_summary = summarizeStreams(time, isRun(sport) ? dist : [], hr);
+  let { error } = await db().from("activities").update(update).eq("id", rowId);
+  // Older database without the stream_summary column: save the rest.
+  if (error && /stream_summary/.test(error.message)) {
+    delete update.stream_summary;
+    ({ error } = await db().from("activities").update(update).eq("id", rowId));
+  }
   if (error) throw error;
+}
+
+/**
+ * Fetches streams for one Strava activity that was synced before pace/HR timelines existed.
+ * One Strava request (two for runs); returns false if Strava has no streams for it.
+ */
+export async function analyseActivity(id: string): Promise<boolean> {
+  const { data: a } = await db().from("activities").select("id, external_id, sport, trainer, source").eq("id", id).maybeSingle();
+  if (!a || a.source !== "strava" || !a.external_id) return false;
+  try {
+    const s = await getStreams(a.external_id);
+    const time = s.time?.data ?? [];
+    const summary = summarizeStreams(time, isRun(a.sport) ? (s.distance?.data ?? []) : [], s.heartrate?.data ?? []);
+    if (!summary) return false;
+    const { error } = await db().from("activities").update({ stream_summary: summary }).eq("id", id);
+    return !error;
+  } catch {
+    return false;
+  }
 }
 
 export interface SyncResult {
