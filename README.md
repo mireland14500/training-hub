@@ -27,6 +27,13 @@ Data comes from:
   - Your 7-day average is tracked against the plan, with a weekly weigh-in count for accountability.
   - A daily fuel call (deficit, fuel a hard day, race week or recover) uses your training call and your upcoming races.
   - It shows what reaching the goal is worth on the run.
+- **Training plan (Plan tab):** a structured block towards a race, built from your goal times, current weekly km, run days and latest 5K test.
+  - Base → Build → Specific → Taper → Race week.
+  - Running volume ramps about 10% a week, with every 4th week lighter.
+  - Weekly sessions: one threshold session, plus run or BikeErg intervals, BikeErg zone-2 volume, a weekly HYROX session (stations → compromised running → sims), a long run, and gym strength.
+  - A 5K test after each lighter week resets every pace in the app.
+  - Shows the HYROX km pace and open 10K/5K your goals need.
+  - Sessions tick off as activities sync.
 - **Session analysis:** every run and HYROX session gets pace and heart-rate charts and a zone breakdown, with coach notes:
   - Was the easy run actually easy? Was the threshold session on threshold pace?
   - Reps are detected automatically, with HR recovery after each one. You also get HR drift, pacing splits, and pace compared with your usual pace at the same HR.

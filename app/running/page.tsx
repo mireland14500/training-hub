@@ -23,9 +23,12 @@ export default async function Running() {
 
   return (
     <div className="mx-auto max-w-xl space-y-3.5">
-      <div>
-        <h1 className="text-2xl font-extrabold">Running</h1>
-        <p className="text-sm text-muted">What you actually ran · no predictions</p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-extrabold">Running</h1>
+          <p className="text-sm text-muted">What you actually ran · no predictions</p>
+        </div>
+        {a.show_predictions && <Link href="/progress" className="btn-ghost text-sm">Progress →</Link>}
       </div>
 
       <section className="card space-y-2">
@@ -124,7 +127,10 @@ export default async function Running() {
 
       {d.paces.length > 0 && (
         <section className="card">
-          <div className="label mb-1">Your training paces{a.garmin_lt_speed ? " · from Garmin LT" : ""}</div>
+          <div className="label mb-1">
+            Your training paces
+            {a.race_date && Date.now() - Date.parse(a.race_date) < 120 * 86400000 ? ` · from your ${a.race_distance_m === 5000 ? "5K" : "latest"} test` : a.garmin_lt_speed ? " · from Garmin LT" : ""}
+          </div>
           <ul className="tabular divide-y divide-border text-sm">
             {d.paces.map((z) => (
               <li key={z.name} className="flex justify-between py-2">

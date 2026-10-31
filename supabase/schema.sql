@@ -226,7 +226,26 @@ create table if not exists races (
 );
 alter table races add column if not exists start_time text;
 
+-- Your training plan settings (one at a time); the weeks are generated from these.
+create table if not exists training_plan (
+  id int primary key default 1 check (id = 1),
+  config jsonb not null,
+  created_at timestamptz default now()
+);
+
+-- 5K tests (or any timed hard effort) — the plan's paces come from the latest.
+create table if not exists pace_tests (
+  id uuid primary key default gen_random_uuid(),
+  date date not null,
+  distance_m numeric not null default 5000,
+  time_s numeric not null,
+  notes text,
+  created_at timestamptz default now()
+);
+
 alter table strava_auth enable row level security;
+alter table training_plan enable row level security;
+alter table pace_tests enable row level security;
 alter table weigh_ins enable row level security;
 alter table body_goal enable row level security;
 alter table races enable row level security;

@@ -507,3 +507,67 @@ export async function deleteRace(form: FormData) {
   if (id) await db().from("races").delete().eq("id", id);
   revalidatePath("/", "layout");
 }
+
+/** "65:00" / "1:05:00" / "3900" → seconds. */
+function clockToSeconds(v: string | null): number | null {
+  if (!v) return null;
+  const parts = v.trim().split(":").map(Number);
+  if (parts.some((n) => !isFinite(n))) return null;
+  return parts.reduce((a, n) => a * 60 + n, 0) || null;
+}
+
+export async function savePlan(form: FormData) {
+  const start = str(form, "start");
+  const raceId = str(form, "race_id");
+  const startKm = num(form, "start_km");
+  const peakKm = num(form, "peak_km");
+  const runDays = num(form, "run_days");
+  if (!start || !ISO_DATE.test(start) || !startKm || !peakKm || ![4, 5, 6].includes(runDays ?? 0)) throw new Error("Fill in every field");
+  let race: { name: string; date: string } | null = null;
+  if (raceId) {
+    const { data } = await db().from("races").select("name, date").eq("id", raceId).maybeSingle();
+    if (data) race = { name: data.name, date: data.date };
+  }
+  const { weeksTo } = await import("@/lib/trainingPlan");
+  const weeks = race ? weeksTo(start, race.date) : Math.min(24, Math.max(6, num(form, "weeks") ?? 16));
+  const config = {
+    start,
+    weeks: Math.min(30, weeks),
+    race,
+    startKm: Math.max(10, startKm),
+    // Don't more than double volume in one block.
+    peakKm: Math.min(Math.max(peakKm, startKm), startKm * 2),
+    runDays,
+    goals: { singles: clockToSeconds(str(form, "goal_singles")), doubles: clockToSeconds(str(form, "goal_doubles")) },
+  };
+  const { error } = await db().from("training_plan").upsert({ id: 1, config, created_at: new Date().toISOString() });
+  if (error) throw new Error(error.message);
+  revalidatePath("/", "layout");
+  redirect("/plan");
+}
+
+export async function deletePlan() {
+  await db().from("training_plan").delete().eq("id", 1);
+  revalidatePath("/", "layout");
+  redirect("/plan");
+}
+
+/** Logs a timed hard effort (5K by default). The latest one also becomes your "recent race" for paces app-wide. */
+export async function savePaceTest(form: FormData) {
+  const time = clockToSeconds(str(form, "time"));
+  const distance = num(form, "distance_m") ?? 5000;
+  const date = str(form, "date") ?? localDate(new Date().toISOString());
+  if (!time || time < 600 || !ISO_DATE.test(date) || distance < 1000) throw new Error("Enter a time like 21:30");
+  const { error } = await db().from("pace_tests").insert({ date, distance_m: distance, time_s: time, notes: str(form, "notes") });
+  if (error) throw new Error(error.message);
+  const { data: latest } = await db().from("pace_tests").select("date").order("date", { ascending: false }).limit(1);
+  if (latest?.[0]?.date === date) await db().from("athlete").update({ race_distance_m: distance, race_time_s: time, race_date: date }).eq("id", 1);
+  revalidatePath("/", "layout");
+  redirect("/plan#paces");
+}
+
+export async function deletePaceTest(form: FormData) {
+  const id = str(form, "id");
+  if (id) await db().from("pace_tests").delete().eq("id", id);
+  revalidatePath("/", "layout");
+}

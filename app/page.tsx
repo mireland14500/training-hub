@@ -2,6 +2,7 @@ import Link from "next/link";
 import BandSparkline from "@/components/BandSparkline";
 import SyncButton from "@/components/SyncButton";
 import { loadBodyPlan } from "@/lib/bodyplan";
+import { planData } from "@/lib/data";
 import Countdown from "@/components/Countdown";
 import { todayData } from "@/lib/data";
 import type { Verdict } from "@/lib/plan";
@@ -41,7 +42,9 @@ function Tile({ m, suffix }: { m: MetricStatus | undefined; suffix?: string }) {
 
 export default async function Today() {
   const d = await todayData();
-  const plan = await loadBodyPlan(d.call.call).catch(() => null);
+  const [plan, training] = await Promise.all([loadBodyPlan(d.call.call).catch(() => null), planData().catch(() => null)]);
+  const todayPlan = training?.weeks.flatMap((w) => w.days).find((x) => x.date === training.today) ?? null;
+  const hardToday = todayPlan?.sessions.some((s) => s.hard && s.status !== "done");
 
   if (!d.stravaConnected && !d.hasActivities) {
     return (
@@ -103,6 +106,24 @@ export default async function Today() {
           </ul>
         )}
       </section>
+
+      {todayPlan && todayPlan.sessions.length > 0 && (
+        <Link href="/plan" className="card block space-y-1.5 hover:border-accent">
+          <div className="flex items-baseline justify-between">
+            <div className="text-xs font-semibold uppercase tracking-wide text-muted">Today&apos;s plan</div>
+            <span className="text-muted">→</span>
+          </div>
+          {todayPlan.sessions.map((s, i) => (
+            <div key={i} className={`flex items-baseline justify-between gap-2 ${s.status === "done" ? "text-muted line-through" : ""}`}>
+              <span className={s.hard ? "font-bold" : "font-semibold"}>{s.title}</span>
+              {s.status === "done" && <span className="text-sm font-bold text-good no-underline">✓</span>}
+            </div>
+          ))}
+          {hardToday && d.call.call !== "push" && (
+            <p className="text-xs text-warn">Recovery says {d.call.call} today — swap this with your next easy day rather than forcing it.</p>
+          )}
+        </Link>
+      )}
 
       {plan?.ready && (plan.goal || plan.races.length > 0) && (
         <Link href="/body" className="card flex items-center justify-between gap-3 hover:border-accent">

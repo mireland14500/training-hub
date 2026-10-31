@@ -56,6 +56,7 @@ import {
 } from "./workout";
 import { isRun } from "./strava";
 import { analyseActivity, applyGarminLoadsIfNeeded } from "./sync";
+import { buildPlan, goalRunning, nextMonday, pacesFrom5k, type PlanConfig, type SessionType } from "./trainingPlan";
 
 const TZ = process.env.APP_TIMEZONE || "UTC";
 const dayFmt = new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" });
@@ -1251,5 +1252,138 @@ export async function sessionAnalysisData(a: ActivityRow) {
     division: (splits?.division ?? athlete.hyrox_division) as Division,
     tenKPace: tenK ? tenK / 10 : null,
     canFetch: activity.source === "strava" && !activity.stream_summary,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Training plan
+// ---------------------------------------------------------------------------
+
+const BIKE_SPORTS = ["Ride", "VirtualRide", "EBikeRide", "BikeErg", "Velomobile", "Handcycle"];
+const isBike = (a: ActivityRow) => BIKE_SPORTS.includes(a.sport) || /bike ?erg|spin|cycl|bike/i.test(a.name ?? "") || /cycling/.test(a.garmin_type ?? "");
+
+/** Does a logged activity tick off a planned session of this type? */
+function ticks(type: SessionType, a: ActivityRow): boolean {
+  if (a.excluded) return false;
+  const cat = categorize(a.sport, a.name, a.focus, a.entries, a.garmin_type);
+  switch (type) {
+    case "bike-easy":
+    case "bike-intervals":
+      return isBike(a) || !!entryTags(a.entries).erg;
+    case "hyrox":
+    case "race":
+      return cat === "hyrox";
+    case "strength":
+      return cat === "strength" || cat === "hyrox";
+    case "rest":
+      return false;
+    default:
+      return cat === "run" || isRun(a.sport);
+  }
+}
+
+export interface PaceSource {
+  fiveK: number;
+  label: string;
+  date: string | null;
+  fromTest: boolean;
+}
+
+/** The 5K the plan's paces come from: your latest test (any distance, converted), else the app's estimate. */
+function paceSource(tests: { date: string; distance_m: number; time_s: number }[], fallbackVdot: number | null): PaceSource | null {
+  const t = tests[0];
+  if (t) {
+    const fiveK = Number(t.distance_m) === 5000 ? Number(t.time_s) : predictTime(vdotFromPerformance(Number(t.distance_m), Number(t.time_s)), 5000);
+    return { fiveK, label: Number(t.distance_m) === 5000 ? `5K test ${t.date}` : `${(Number(t.distance_m) / 1000).toFixed(1)} km test ${t.date} (5K equivalent)`, date: t.date, fromTest: true };
+  }
+  return fallbackVdot ? { fiveK: predictTime(fallbackVdot, 5000), label: "estimated from your recent runs — log a 5K test to set it properly", date: null, fromTest: false } : null;
+}
+
+export async function planData() {
+  const [e, planRes, testsRes, racesRes] = await Promise.all([
+    loadEverything(),
+    db().from("training_plan").select("config").eq("id", 1).maybeSingle(),
+    db().from("pace_tests").select("*").order("date", { ascending: false }).limit(20),
+    db().from("races").select("*").gte("date", today()).order("date"),
+  ]);
+  const ready = !planRes.error && !testsRes.error;
+  const t = today();
+  const runs = e.activities.filter((a) => isRun(a.sport));
+  const tests = (testsRes.data ?? []) as { id: string; date: string; distance_m: number; time_s: number; notes: string | null }[];
+  const vdotNow = vdotAsOf(runs, e.athlete, t, true);
+  const source = paceSource(tests, vdotNow);
+  const paces = source ? pacesFrom5k(source.fiveK) : null;
+  const races = racesRes.error ? [] : ((racesRes.data ?? []) as { id: string; name: string; date: string }[]);
+
+  // What your goals ask of your running, from today's station + Roxzone predictions.
+  const sims = hyroxSessions(e, runs);
+  const main = e.athlete.hyrox_division as Division;
+  const doubles = doublesDivision(e);
+  const goalFor = (division: Division, goal: number | null) => {
+    if (!goal) return null;
+    const p = predictAt(e, runs, sims, t, true, division);
+    const runSeg = p.segments.find((s) => s.key === "runs");
+    if (!runSeg) return null;
+    const need = goalRunning(goal, p.total - runSeg.time, p.runPenalty);
+    return need ? { division, label: DIVISIONS[division], goal, predicted: p.total, runNow: runSeg.time / 8, nonRun: p.total - runSeg.time, ...need } : null;
+  };
+
+  // Recent 5K-ish efforts from Strava, to pick as a test without retyping.
+  const bests = stravaBestsWithin(runs, daysAgo(60), t);
+  const stravaFiveK = bests["5K"] ? { seconds: bests["5K"].seconds, date: bests["5K"].date } : null;
+
+  const config = (planRes.data?.config ?? null) as PlanConfig | null;
+  // A race in the 10 days before the plan starts: week 1 is recovery.
+  const justRaced = !!config && e.activities.some((a) => {
+    const d = localDate(a.start_time);
+    return categorize(a.sport, a.name, a.focus, a.entries, a.garmin_type) === "hyrox" && (a.focus === "race" || a.sport === "HYROX") && d <= config.start && d >= shift(config.start, -10);
+  });
+  const recentTest = tests.some((x) => x.date >= shift(config?.start ?? t, -21));
+  const weeks = config && paces ? buildPlan(config, paces, { goalKmPace: goalFor(main, config.goals.singles)?.kmPace ?? null, testFirstWeek: !recentTest, justRaced }) : [];
+
+  // Tick off what's done.
+  const byDay = new Map<string, ActivityRow[]>();
+  for (const a of e.activities) {
+    const d = localDate(a.start_time);
+    byDay.set(d, [...(byDay.get(d) ?? []), a]);
+  }
+  const marked = weeks.map((w) => ({
+    ...w,
+    days: w.days.map((sessions, k) => {
+      const date = shift(w.start, k);
+      const acts = byDay.get(date) ?? [];
+      return {
+        date,
+        sessions: sessions.map((s) => {
+          const match = acts.find((a) => ticks(s.type, a));
+          const status = s.type === "rest" ? "rest" : match ? "done" : date < t ? "missed" : date === t ? "today" : "upcoming";
+          return { ...s, status, activityId: match?.id ?? null };
+        }),
+      };
+    }),
+  }));
+  const current = marked.findIndex((w) => t >= w.start && t < shift(w.start, 7));
+
+  return {
+    ready,
+    today: t,
+    config,
+    weeks: marked,
+    current,
+    paces,
+    source,
+    tests,
+    stravaFiveK,
+    races,
+    goals: config ? { singles: goalFor(main, config.goals.singles), doubles: goalFor(doubles, config.goals.doubles) } : null,
+    defaults: {
+      start: nextMonday(t),
+      race: races[0] ?? null,
+      startKm: Math.round(
+        runs.filter((a) => localDate(a.start_time) >= daysAgo(27)).reduce((s, a) => s + (a.distance_m ?? 0), 0) / 4000,
+      ),
+      singlesDivision: DIVISIONS[main],
+      doublesDivision: DIVISIONS[doubles],
+    },
   };
 }
