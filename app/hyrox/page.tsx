@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { confirmRace } from "@/app/actions";
-import { stationTime, vsThreshold } from "@/components/hyroxView";
+import { bestAndWorst, stationTime, vsThreshold } from "@/components/hyroxView";
+import RacePatch from "@/components/RacePatch";
+import { racePlace } from "@/lib/raceCountry";
 import { formatDuration, formatPace } from "@/lib/analysis";
 import { hyroxSummary } from "@/lib/data";
 
@@ -56,21 +58,25 @@ export default async function Hyrox() {
             const e = c.entries[0];
             const st = stationTime(e);
             const best = Math.min(...c.entries.map((x) => x.total));
+            const bw = bestAndWorst(e, c.division);
             return (
               <li key={c.division}>
                 <Link href={`/hyrox/${c.division}`} className="card flex h-full flex-col gap-2 p-3.5 transition hover:border-accent active:scale-[0.98]">
-                  <div className="flex items-start justify-between gap-1">
-                    <span className="text-xs font-bold uppercase tracking-wide text-accent">{c.label}</span>
-                    <span className="text-muted" aria-hidden>›</span>
-                  </div>
-                  <div>
-                    <div className="tabular text-2xl font-extrabold leading-none">{formatDuration(e.total)}</div>
-                    <div className="mt-1 truncate text-[11px] text-muted">
-                      {e.name.replace(/^hyrox\s*/i, "")} · {fmtDate(e.date)}
-                      {e.total === best && c.entries.length > 1 ? " · PB" : ""}
+                  <div className="flex items-center gap-2.5">
+                    <RacePatch name={e.name} date={e.date} size={54} />
+                    <div className="min-w-0">
+                      <div className="text-[11px] font-bold uppercase leading-tight tracking-wide text-accent">{c.label.replace(/ (Men|Women|Mixed)$/, "")}</div>
+                      <div className="text-[11px] font-semibold leading-tight">{c.label.match(/(Men|Women|Mixed)$/)?.[0]}</div>
+                      <div className="truncate text-[11px] text-muted">
+                        {racePlace(e.name).city} · {fmtDate(e.date)}
+                      </div>
                     </div>
                   </div>
-                  <div className="tabular mt-auto grid grid-cols-2 gap-1.5 text-center">
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="tabular text-2xl font-extrabold leading-none">{formatDuration(e.total)}</span>
+                    {e.total === best && c.entries.length > 1 && <span className="rounded bg-good/15 px-1 text-[10px] font-bold text-good">PB</span>}
+                  </div>
+                  <div className="tabular grid grid-cols-2 gap-1.5 text-center">
                     <div className="rounded-lg bg-bg px-1 py-1.5">
                       <div className="text-[10px] uppercase text-muted">Run</div>
                       <div className="text-sm font-bold">{e.runAvg ? formatPace(e.runAvg) : "–"}</div>
@@ -82,6 +88,19 @@ export default async function Hyrox() {
                       <div className="text-[10px] text-muted">{st ? "incl. Roxzone" : "add run pace"}</div>
                     </div>
                   </div>
+                  {!bw && <div className="mt-auto text-[11px] text-muted">Add splits to see best and worst station</div>}
+                  {bw && (
+                    <div className="mt-auto space-y-0.5 text-[11px]">
+                      <div className="flex justify-between gap-1">
+                        <span className="text-muted">Best</span>
+                        <span className="truncate font-semibold text-good">{bw.best.name}</span>
+                      </div>
+                      <div className="flex justify-between gap-1">
+                        <span className="text-muted">Worst</span>
+                        <span className="truncate font-semibold text-warn">{bw.worst.name}</span>
+                      </div>
+                    </div>
+                  )}
                 </Link>
               </li>
             );

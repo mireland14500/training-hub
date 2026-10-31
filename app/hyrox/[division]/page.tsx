@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { saveHyroxRunInfo } from "@/app/actions";
-import { stationTime, vsThreshold } from "@/components/hyroxView";
+import { bestAndWorst, stationTime, vsThreshold } from "@/components/hyroxView";
+import RacePatch from "@/components/RacePatch";
+import { racePlace } from "@/lib/raceCountry";
 import { formatDuration, formatPace } from "@/lib/analysis";
 import { hyroxSummary, type HyroxEntry } from "@/lib/data";
 
@@ -26,6 +28,8 @@ export default async function HyroxCategory({ params, searchParams }: { params: 
   const e = c.entries.find((x) => x.id === id) ?? c.entries[0];
   const thr = d.threshold;
   const st = stationTime(e);
+  const bw = bestAndWorst(e, c.division);
+  const place = racePlace(e.name);
 
   return (
     <div className="mx-auto max-w-xl space-y-3">
@@ -46,14 +50,16 @@ export default async function HyroxCategory({ params, searchParams }: { params: 
       </div>
 
       <section className="card space-y-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
+        <div className="flex items-center gap-3">
+          <RacePatch name={e.name} date={e.date} size={76} />
+          <div className="min-w-0 flex-1">
             <Link href={`/session/${e.id}`} className="block truncate font-bold hover:text-accent">{e.name}</Link>
             <div className="text-xs text-muted">
               {e.kind} · {fmtDate(e.date)}
+              {place.country ? ` · ${place.country}` : ""}
             </div>
+            <div className="tabular mt-0.5 text-3xl font-extrabold leading-none">{formatDuration(e.total)}</div>
           </div>
-          <div className="tabular shrink-0 text-3xl font-extrabold">{formatDuration(e.total)}</div>
         </div>
         <div className="tabular grid grid-cols-3 gap-2 text-center">
           <Stat label="Avg run" value={e.runAvg ? formatPace(e.runAvg) : "–"} sub={e.runAvg && thr ? `${vsThreshold(e.runAvg, thr.pace)} vs threshold` : "/km"} />
@@ -62,6 +68,26 @@ export default async function HyroxCategory({ params, searchParams }: { params: 
         </div>
         {e.runAvg && thr && <p className="text-sm">{verdict(e, thr.pace)}</p>}
       </section>
+
+      {bw && (
+        <div className="grid grid-cols-2 gap-2">
+          {(
+            [
+              ["Best station", bw.best, "var(--good)"],
+              ["Worst station", bw.worst, "var(--warn)"],
+            ] as const
+          ).map(([label, s, color]) => (
+            <div key={label} className="card p-3" style={{ borderColor: color }}>
+              <div className="text-[11px] font-semibold uppercase" style={{ color }}>{label}</div>
+              <div className="truncate font-bold">{s.name}</div>
+              <div className="tabular text-xl font-extrabold">{formatDuration(s.time)}</div>
+              <div className="tabular text-[11px] text-muted">
+                {s.time <= s.ref ? `${formatDuration(s.ref - s.time)} under` : `+${formatDuration(s.time - s.ref)} vs`} a top-15% {formatDuration(s.ref)}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {e.runs && thr && <RunSplits runs={e.runs} threshold={thr.pace} />}
 

@@ -37,6 +37,7 @@ import {
   simKind,
   SIM_NAME,
   DOUBLES_NAME,
+  type StationKey,
 } from "./hyrox";
 import { categorize, timeOffStatus, weeklyPlan, type SessionSummary, type TimeOff } from "./plan";
 import { recoveryStatus, todayCall, type RecoveryDay } from "./recovery";
@@ -1405,7 +1406,7 @@ export interface HyroxEntry {
   total: number;
   /** 1 km run splits, when logged. */
   runs: number[] | null;
-  stations: { name: string; time: number }[] | null;
+  stations: { key: StationKey; name: string; time: number }[] | null;
   roxzone: number | null;
   /** Average run split (s/km): from splits, or what you entered. */
   runAvg: number | null;
@@ -1433,7 +1434,7 @@ export async function hyroxSummary(pre?: Everything) {
     const logged = a.sport === "HYROX" ? a : e.activities.find((x) => x.sport === "HYROX" && x.linked_activity_id === a.id);
     const sp = (logged?.details as unknown as HyroxSplits | null) ?? null;
     const runs = sp?.runs?.filter((r): r is number => !!r && r > 0) ?? [];
-    const stations = sp ? STATIONS.map((st) => ({ name: st.name.replace(/ \d.*$/, ""), time: sp.stations[st.key] ?? 0 })).filter((s) => s.time > 0) : [];
+    const stations = sp ? STATIONS.map((st) => ({ key: st.key, name: st.name.replace(/ \d.*$/, ""), time: sp.stations[st.key] ?? 0 })).filter((s) => s.time > 0) : [];
     const manual = a.hyrox_run_pace_s ?? logged?.hyrox_run_pace_s ?? null;
     const runAvg = runs.length >= 4 ? runs.reduce((x, y) => x + y, 0) / runs.length : manual;
     if (logged) seen.add(logged.id);
