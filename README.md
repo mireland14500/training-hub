@@ -27,7 +27,8 @@ Data comes from:
   - Your 7-day average is tracked against the plan, with a weekly weigh-in count for accountability.
   - A daily fuel call (deficit, fuel a hard day, race week or recover) uses your training call and your upcoming races.
   - It shows what reaching the goal is worth on the run.
-- **Training plan (Plan tab):** a structured block towards a race, built from your goal times, current weekly km, run days and latest 5K test.
+- **HYROX tab:** your latest race or sim, with your average 1 km run split against your threshold pace (Garmin's lactate threshold), run splits, stations and previous results. For a race synced from Strava without splits, type your average run pace and category.
+- **Training plan (Plan tab):** a Runna-style calendar of suggested workouts. Each one breaks down into warm-up, main set and cool-down with paces, and what you actually did shows alongside. a structured block towards a race, built from your goal times, current weekly km, run days and latest 5K test.
   - Base → Build → Specific → Taper → Race week.
   - Running volume ramps about 10% a week, with every 4th week lighter.
   - Weekly sessions: one threshold session, plus run or BikeErg intervals, BikeErg zone-2 volume, a weekly HYROX session (stations → compromised running → sims), a long run, and gym strength.

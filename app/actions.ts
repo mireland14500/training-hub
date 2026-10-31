@@ -571,3 +571,18 @@ export async function deletePaceTest(form: FormData) {
   if (id) await db().from("pace_tests").delete().eq("id", id);
   revalidatePath("/", "layout");
 }
+
+/** For a HYROX result without splits: your average 1 km run split and the category you raced. */
+export async function saveHyroxRunInfo(form: FormData) {
+  const id = str(form, "id");
+  const pace = clockToSeconds(str(form, "run_pace"));
+  const division = str(form, "division");
+  if (!id) return;
+  const update: Record<string, unknown> = {};
+  if (pace && pace >= 150 && pace <= 600) update.hyrox_run_pace_s = Math.round(pace);
+  if (division && division in DIVISIONS) update.sim_division = division;
+  if (!Object.keys(update).length) throw new Error("Enter a pace like 4:18");
+  const { error } = await db().from("activities").update(update).eq("id", id);
+  if (error) throw new Error(/hyrox_run_pace_s/.test(error.message) ? "Run supabase/schema.sql in Supabase first (adds the run pace column)." : error.message);
+  revalidatePath("/hyrox");
+}

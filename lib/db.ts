@@ -85,6 +85,8 @@ export interface ActivityRow {
   sim_division?: string | null;
   /** Compact pace/HR timeline and km splits — see lib/streams.ts. */
   stream_summary?: import("./streams").StreamSummary | null;
+  /** Average HYROX 1 km run split you entered for a result without full splits. */
+  hyrox_run_pace_s?: number | null;
 }
 
 export interface AthleteRow {

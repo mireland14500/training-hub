@@ -32,6 +32,44 @@ export interface PlannedSession {
   /** Bike minutes, for BikeErg sessions. */
   bikeMin?: number;
   hard: boolean;
+  /** One line for the calendar card, e.g. "9 km · 4:25–4:35/km". */
+  summary?: string;
+  /** Runna-style breakdown: warm-up, main set, cool-down. */
+  steps?: { label: string; what: string; pace?: string }[];
+}
+
+/** Adds the calendar summary line and the step-by-step breakdown to a session. */
+export function withSteps(s: PlannedSession, p: Paces): PlannedSession {
+  const wu = { label: "Warm up", what: "15 min easy, then 4 × 20 s strides", pace: p.easy };
+  const cd = { label: "Cool down", what: "10 min easy", pace: p.easy };
+  const km = s.km ? `${Math.round(s.km)} km` : "";
+  switch (s.type) {
+    case "threshold":
+      if (s.title === "Openers")
+        return { ...s, summary: `${km} · sharpen`, steps: [{ label: "Warm up", what: "15 min easy", pace: p.easy }, { label: "Main set", what: "3 × 3 min, 2 min jog between", pace: p.threshold }, { label: "Finish", what: "4 × 20 s strides, 5 min easy" }] };
+      return { ...s, summary: `${km} · ${p.threshold}/km`, steps: [wu, { label: "Main set", what: s.title.replace(/^Threshold: /, ""), pace: p.threshold }, cd] };
+    case "intervals":
+      return { ...s, summary: `${km} · ${p.interval}/km`, steps: [wu, { label: "Main set", what: s.title.replace(/^Intervals: /, ""), pace: p.interval }, cd] };
+    case "test":
+      return { ...s, summary: `${km} · all-out 5K`, steps: [wu, { label: "Test", what: "5K as fast as you can hold — even pace, empty the tank in the last km" }, cd] };
+    case "easy":
+    case "brick":
+      return { ...s, summary: `${km || "15–20 min"} · ${p.easy}/km`, steps: [{ label: s.type === "brick" ? "Off the bike" : "Run", what: s.type === "brick" ? "15–20 min easy, straight off the BikeErg" : `${km} easy, zone 2`, pace: p.easy }] };
+    case "long":
+      return { ...s, summary: `${km} · ${p.long}/km`, steps: [{ label: "Run", what: `${km} conversational${/marathon pace/.test(s.detail) ? ", last 15 min at marathon pace" : ""}`, pace: p.long }] };
+    case "bike-easy":
+      return { ...s, summary: `${s.bikeMin ?? 35} min · zone 2`, steps: [{ label: "Ride", what: `${s.bikeMin ?? 35} min at nose-breathing effort (zone 2 HR)` }] };
+    case "bike-intervals":
+      return { ...s, summary: `${s.bikeMin ?? 40} min · intervals`, steps: [{ label: "Warm up", what: "10 min easy spin" }, { label: "Main set", what: s.title.replace(/^BikeErg: /, "") + " — hard = RPE 8" }, { label: "Cool down", what: "5 min easy" }] };
+    case "hyrox":
+      return { ...s, summary: km ? `~${km} running + stations` : "stations", steps: [{ label: "Session", what: s.detail }] };
+    case "strength":
+      return { ...s, summary: "45 min", steps: [{ label: "Lifts", what: "Squat or split squat, RDL, step-ups, calf raises, core — 3 × 6–10" }] };
+    case "race":
+      return { ...s, summary: "Race day", steps: [{ label: "Race", what: s.detail }] };
+    default:
+      return { ...s, summary: "Rest or easy spin" };
+  }
 }
 
 export type Phase = "Base" | "Build" | "Specific" | "Taper" | "Race week";
@@ -296,7 +334,7 @@ export function buildPlan(c: PlanConfig, paces: Paces, opts: { goalKmPace: numbe
             : phase === "Taper"
               ? "Volume down, keep a little intensity. Arrive fresh."
               : "Openers, rest, carb load, race.";
-    return { index: i, start: weekStart, phase, lighter, km: Math.round(days.flat().reduce((a, s) => a + s.km, 0)), bikeMin, focus: lighter ? "Lighter week — absorb the training." : focus, days };
+    return { index: i, start: weekStart, phase, lighter, km: Math.round(days.flat().reduce((a, s) => a + s.km, 0)), bikeMin, focus: lighter ? "Lighter week — absorb the training." : focus, days: days.map((d) => d.map((x) => withSteps(x, paces))) };
   });
 }
 

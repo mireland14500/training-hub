@@ -56,7 +56,7 @@ import {
 } from "./workout";
 import { isRun } from "./strava";
 import { analyseActivity, applyGarminLoadsIfNeeded } from "./sync";
-import { buildPlan, goalRunning, nextMonday, pacesFrom5k, type PlanConfig, type SessionType } from "./trainingPlan";
+import { buildPlan, nextMonday, pacesFrom5k, type PlanConfig, type SessionType } from "./trainingPlan";
 
 const TZ = process.env.APP_TIMEZONE || "UTC";
 const dayFmt = new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" });
@@ -361,7 +361,8 @@ function hyroxResults(e: Everything): HyroxResult[] {
       const sp = a.details as unknown as HyroxSplits | null;
       if (sp?.kind === "race") out.push({ id: a.id, date, name: a.name ?? "HYROX race", total: a.duration_s, hasSplits: true, fromStrava: false, division: sp.division ?? main });
     } else if (a.focus === "race" && !a.excluded) {
-      out.push({ id: a.id, date, name: a.name ?? "HYROX", total: a.duration_s, hasSplits: false, fromStrava: a.source === "strava", division: main });
+      const div = a.sim_division && a.sim_division in DIVISIONS ? (a.sim_division as Division) : main;
+      out.push({ id: a.id, date, name: a.name ?? "HYROX", total: a.duration_s, hasSplits: false, fromStrava: a.source === "strava", division: div });
     }
   }
   return out
@@ -1315,18 +1316,8 @@ export async function planData() {
   const paces = source ? pacesFrom5k(source.fiveK) : null;
   const races = racesRes.error ? [] : ((racesRes.data ?? []) as { id: string; name: string; date: string }[]);
 
-  // What your goals ask of your running, from today's station + Roxzone predictions.
-  const sims = hyroxSessions(e, runs);
-  const main = e.athlete.hyrox_division as Division;
-  const doubles = doublesDivision(e);
-  const goalFor = (division: Division, goal: number | null) => {
-    if (!goal) return null;
-    const p = predictAt(e, runs, sims, t, true, division);
-    const runSeg = p.segments.find((s) => s.key === "runs");
-    if (!runSeg) return null;
-    const need = goalRunning(goal, p.total - runSeg.time, p.runPenalty);
-    return need ? { division, label: DIVISIONS[division], goal, predicted: p.total, runNow: runSeg.time / 8, nonRun: p.total - runSeg.time, ...need } : null;
-  };
+  // HYROX sessions in the plan run at your latest race pace, a touch quicker.
+  const latestRun = (await hyroxSummary(e)).latest?.runAvg ?? null;
 
   // Recent 5K-ish efforts from Strava, to pick as a test without retyping.
   const bests = stravaBestsWithin(runs, daysAgo(60), t);
@@ -1339,7 +1330,7 @@ export async function planData() {
     return categorize(a.sport, a.name, a.focus, a.entries, a.garmin_type) === "hyrox" && (a.focus === "race" || a.sport === "HYROX") && d <= config.start && d >= shift(config.start, -10);
   });
   const recentTest = tests.some((x) => x.date >= shift(config?.start ?? t, -21));
-  const weeks = config && paces ? buildPlan(config, paces, { goalKmPace: goalFor(main, config.goals.singles)?.kmPace ?? null, testFirstWeek: !recentTest, justRaced }) : [];
+  const weeks = config && paces ? buildPlan(config, paces, { goalKmPace: latestRun ? latestRun - 5 : null, testFirstWeek: !recentTest, justRaced }) : [];
 
   // Tick off what's done.
   const byDay = new Map<string, ActivityRow[]>();
@@ -1354,6 +1345,21 @@ export async function planData() {
       const acts = byDay.get(date) ?? [];
       return {
         date,
+        done: acts
+          .filter((a) => !a.excluded)
+          .map((a) => {
+            const moving = a.moving_s ?? a.duration_s;
+            return {
+              id: a.id,
+              name: a.name ?? a.sport,
+              detail: [
+                a.distance_m && a.distance_m > 300 ? `${(a.distance_m / 1000).toFixed(1)} km` : formatDuration(moving),
+                isRun(a.sport) && a.distance_m ? `${formatPace(moving / (a.distance_m / 1000))}/km` : null,
+              ]
+                .filter(Boolean)
+                .join(" · "),
+            };
+          }),
         sessions: sessions.map((s) => {
           const match = acts.find((a) => ticks(s.type, a));
           const status = s.type === "rest" ? "rest" : match ? "done" : date < t ? "missed" : date === t ? "today" : "upcoming";
@@ -1375,15 +1381,94 @@ export async function planData() {
     tests,
     stravaFiveK,
     races,
-    goals: config ? { singles: goalFor(main, config.goals.singles), doubles: goalFor(doubles, config.goals.doubles) } : null,
+    latestRun,
     defaults: {
       start: nextMonday(t),
       race: races[0] ?? null,
       startKm: Math.round(
         runs.filter((a) => localDate(a.start_time) >= daysAgo(27)).reduce((s, a) => s + (a.distance_m ?? 0), 0) / 4000,
       ),
-      singlesDivision: DIVISIONS[main],
-      doublesDivision: DIVISIONS[doubles],
     },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// HYROX: latest result, running vs threshold
+// ---------------------------------------------------------------------------
+
+export interface HyroxEntry {
+  id: string;
+  date: string;
+  name: string;
+  kind: "Race" | "Full sim" | "Half sim";
+  division: Division;
+  total: number;
+  /** 1 km run splits, when logged. */
+  runs: number[] | null;
+  stations: { name: string; time: number }[] | null;
+  roxzone: number | null;
+  /** Average run split (s/km): from splits, or what you entered. */
+  runAvg: number | null;
+  /** Entered by hand rather than from splits. */
+  runFromInput: boolean;
+}
+
+/** Your threshold pace (s/km): Garmin's lactate threshold first, else estimated from your runs. */
+function thresholdPace(e: Everything): { pace: number; source: string } | null {
+  if (e.athlete.threshold_pace_override) return { pace: e.athlete.threshold_pace_override, source: "your threshold pace in Settings" };
+  if (e.athlete.garmin_lt_speed) return { pace: 1000 / e.athlete.garmin_lt_speed, source: `Garmin lactate threshold${e.athlete.garmin_lt_date ? ` (${e.athlete.garmin_lt_date})` : ""}` };
+  const vdot = vdotAsOf(e.activities.filter((a) => isRun(a.sport)), e.athlete, today(), true);
+  return vdot ? { pace: thresholdPaceFromVdot(vdot), source: "estimated from your runs" } : null;
+}
+
+export async function hyroxSummary(pre?: Everything) {
+  const e = pre ?? (await loadEverything());
+  const main = e.athlete.hyrox_division as Division;
+  const byId = new Map(e.activities.map((a) => [a.id, a]));
+  const entries: HyroxEntry[] = [];
+  const seen = new Set<string>();
+
+  const fromActivity = (a: ActivityRow, kind: HyroxEntry["kind"], division: Division, total: number): HyroxEntry => {
+    // Splits from the session itself, or a logged HYROX session linked to this Strava recording.
+    const logged = a.sport === "HYROX" ? a : e.activities.find((x) => x.sport === "HYROX" && x.linked_activity_id === a.id);
+    const sp = (logged?.details as unknown as HyroxSplits | null) ?? null;
+    const runs = sp?.runs?.filter((r): r is number => !!r && r > 0) ?? [];
+    const stations = sp ? STATIONS.map((st) => ({ name: st.name.replace(/ \d.*$/, ""), time: sp.stations[st.key] ?? 0 })).filter((s) => s.time > 0) : [];
+    const manual = a.hyrox_run_pace_s ?? logged?.hyrox_run_pace_s ?? null;
+    const runAvg = runs.length >= 4 ? runs.reduce((x, y) => x + y, 0) / runs.length : manual;
+    if (logged) seen.add(logged.id);
+    seen.add(a.id);
+    return {
+      id: a.id,
+      date: localDate(a.start_time),
+      name: a.name ?? "HYROX",
+      kind,
+      division,
+      total,
+      runs: runs.length >= 4 ? runs : null,
+      stations: stations.length ? stations : null,
+      roxzone: sp?.roxzone_s ?? null,
+      runAvg,
+      runFromInput: runs.length < 4 && manual !== null,
+    };
+  };
+
+  for (const r of hyroxResults(e)) {
+    const a = byId.get(r.id);
+    if (a && !seen.has(a.id)) entries.push(fromActivity(a, "Race", r.division, r.total));
+  }
+  for (const s of simResults(e)) {
+    const a = byId.get(s.id);
+    if (a && !seen.has(a.id)) entries.push(fromActivity(a, s.kind === "full" ? "Full sim" : "Half sim", s.division, s.total));
+  }
+  entries.sort((x, y) => (x.date < y.date ? 1 : -1));
+
+  return {
+    latest: entries[0] ?? null,
+    history: entries.slice(0, 12),
+    threshold: thresholdPace(e),
+    main,
+    possibleRaces: possibleRaces(e, hyroxResults(e)),
+    divisions: Object.entries(DIVISIONS) as [Division, string][],
   };
 }
