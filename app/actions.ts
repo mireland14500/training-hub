@@ -584,5 +584,7 @@ export async function saveHyroxRunInfo(form: FormData) {
   if (!Object.keys(update).length) throw new Error("Enter a pace like 4:18");
   const { error } = await db().from("activities").update(update).eq("id", id);
   if (error) throw new Error(/hyrox_run_pace_s/.test(error.message) ? "Run supabase/schema.sql in Supabase first (adds the run pace column)." : error.message);
-  revalidatePath("/hyrox");
+  revalidatePath("/hyrox", "layout");
+  // The category may have changed, so go to the result's (possibly new) category page.
+  redirect(division && division in DIVISIONS ? `/hyrox/${division}?id=${id}` : "/hyrox");
 }

@@ -1463,9 +1463,18 @@ export async function hyroxSummary(pre?: Everything) {
   }
   entries.sort((x, y) => (x.date < y.date ? 1 : -1));
 
+  // One bubble per category raced (newest first), each with its results newest first.
+  const categories: { division: Division; label: string; entries: HyroxEntry[] }[] = [];
+  for (const x of entries) {
+    const c = categories.find((k) => k.division === x.division);
+    if (c) c.entries.push(x);
+    else categories.push({ division: x.division, label: DIVISIONS[x.division], entries: [x] });
+  }
+
   return {
     latest: entries[0] ?? null,
     history: entries.slice(0, 12),
+    categories,
     threshold: thresholdPace(e),
     main,
     possibleRaces: possibleRaces(e, hyroxResults(e)),
